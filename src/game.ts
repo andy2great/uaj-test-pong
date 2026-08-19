@@ -30,6 +30,7 @@ const COMET_TAIL_SPEED_OPACITY = 0.5;
 const MAX_BOUNCE_ANGLE = Math.PI / 3; // 60 degrees from vertical at the paddle edges
 const WINNING_SCORE = 11; // first player to reach this score wins the match
 const SERVE_DELAY_SECONDS = 1; // pause after a point before the ball re-serves
+const GAME_TITLE = 'PONG';
 const MAX_WALL_BOUNCES_PER_FRAME = 8; // safety bound on the per-frame wall-bounce segment walk below
 
 // Type system: one font stack plus a small set of named text roles, so every
@@ -349,6 +350,7 @@ export class Game {
   score1 = 0; // player 1 (top) score
   score2 = 0; // player 2 (bottom) score
   winner: PaddleId | null = null;
+  titleScreenActive = true; // shown once on first load, dismissed by the first tap
 
   activePowerUp: PowerUp | null = null;
   lastPaddleTouch: PaddleId | null = null; // paddle that most recently hit the ball this rally
@@ -381,7 +383,8 @@ export class Game {
     }
     this.paddle1X = width / 2;
     this.paddle2X = width / 2;
-    this.serve(width, height);
+    this.ballX = width / 2;
+    this.ballY = height / 2;
     this.initialized = true;
   }
 
@@ -486,6 +489,10 @@ export class Game {
 
   onPointerDown(pointerId: number, x: number, y: number, width: number, height: number): void {
     this.ensureInitialized(width, height);
+    if (this.titleScreenActive) {
+      this.titleScreenActive = false;
+      this.serveDelayRemaining = SERVE_DELAY_SECONDS;
+    }
     if (this.winner !== null) {
       this.restartMatch(width, height);
       return;
@@ -741,6 +748,10 @@ export class Game {
     this.lastHeight = height;
     this.lastWidth = width;
     this.backdropTime += dt;
+
+    if (this.titleScreenActive) {
+      return;
+    }
 
     if (this.impacts.length > 0) {
       this.impacts = this.impacts.filter((impact) => {
@@ -1229,6 +1240,31 @@ export class Game {
     ctx.fillText(String(this.score1), width / 2, height * 0.28);
     ctx.fillText(String(this.score2), width / 2, height * 0.72);
     ctx.restore();
+
+    if (this.titleScreenActive) {
+      ctx.fillStyle = 'rgba(10, 17, 40, 0.55)';
+      ctx.fillRect(0, 0, width, height);
+
+      ctx.save();
+      ctx.fillStyle = '#e8ecf5';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.shadowColor = 'rgba(120, 170, 255, 0.85)';
+      ctx.shadowBlur = height * 0.025;
+      applyTextStyle(ctx, 'primary', height * 0.06);
+      ctx.fillText(GAME_TITLE, width / 2, height / 2 - height * 0.04);
+      ctx.restore();
+
+      ctx.save();
+      ctx.fillStyle = '#e8ecf5';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.shadowColor = 'rgba(120, 170, 255, 0.85)';
+      ctx.shadowBlur = height * 0.02;
+      applyTextStyle(ctx, 'secondary', height * 0.025);
+      ctx.fillText('Tap to start', width / 2, height / 2 + height * 0.04);
+      ctx.restore();
+    }
 
     if (this.winner !== null) {
       ctx.fillStyle = 'rgba(10, 17, 40, 0.85)';
