@@ -37,6 +37,13 @@ const MAX_WALL_BOUNCES_PER_FRAME = 8; // safety bound on the per-frame wall-boun
 const IMPACT_DURATION_SECONDS = 0.25;
 const IMPACT_PARTICLE_COUNT = 6;
 
+// Pre-serve countdown ring: purely cosmetic, driven by `serveDelayRemaining`
+// and never feeds back into serve timing. Starts wide and shrinks down onto
+// the ball as the pause elapses, so it reads as a visible countdown rather
+// than a frozen frame.
+const SERVE_COUNTDOWN_RING_MAX_RADIUS_RATIO = 6; // ring's starting radius, multiple of ball radius
+const SERVE_COUNTDOWN_RING_LINE_WIDTH_RATIO = 0.35; // ring stroke width, multiple of ball radius
+
 // Pointermove events fire often enough during a real drag that this cap is
 // imperceptible in normal play; it only becomes visible (and boostable) when
 // a power-up scales it up.
@@ -889,6 +896,22 @@ export class Game {
     }
   }
 
+  // Draws the pre-serve countdown ring, centered on the ball's serve
+  // position. Shrinks and brightens as `serveDelayRemaining` counts down to
+  // zero; purely visual, reads existing state without touching serve timing.
+  private renderServeCountdown(ctx: CanvasRenderingContext2D, x: number, y: number, ballRadius: number): void {
+    const progress = 1 - clamp(this.serveDelayRemaining / SERVE_DELAY_SECONDS, 0, 1);
+    const ringRadius = ballRadius + ballRadius * (SERVE_COUNTDOWN_RING_MAX_RADIUS_RATIO - 1) * (1 - progress);
+    const opacity = 0.25 + 0.65 * progress;
+    ctx.save();
+    ctx.strokeStyle = `rgba(232, 236, 245, ${opacity})`;
+    ctx.lineWidth = ballRadius * SERVE_COUNTDOWN_RING_LINE_WIDTH_RATIO;
+    ctx.beginPath();
+    ctx.arc(x, y, ringRadius, 0, Math.PI * 2);
+    ctx.stroke();
+    ctx.restore();
+  }
+
   render(ctx: CanvasRenderingContext2D, width: number, height: number): void {
     this.ensureInitialized(width, height);
 
@@ -913,6 +936,10 @@ export class Game {
       this.renderComet(ctx, ball.x, ball.y, ball.vx, ball.vy, ballRadius, cometBaseSpeed);
     }
     this.renderImpacts(ctx, height);
+
+    if (this.serveDelayRemaining > 0) {
+      this.renderServeCountdown(ctx, this.ballX, this.ballY, ballRadius);
+    }
 
     if (this.activePowerUp !== null) {
       const powerUpRadius = height * POWER_UP_RADIUS_RATIO;
