@@ -129,6 +129,7 @@ export class Game {
   private powerUpSpawnTimer = POWER_UP_SPAWN_INTERVAL_SECONDS;
   private nextPowerUpId = 1;
   private lastHeight = 0;
+  private lastWidth = 0;
   private readonly pointerPaddle = new Map<number, PaddleId>();
 
   private ensureInitialized(width: number, height: number): void {
@@ -297,6 +298,15 @@ export class Game {
     }
     this.giantPaddlePaddle = paddle;
     this.giantPaddleRemaining = GIANT_PADDLE_DURATION_SECONDS;
+    if (this.lastWidth > 0) {
+      const halfWidth = this.paddleWidth(paddle, this.lastWidth) / 2;
+      const clamped = clamp(paddle === 1 ? this.paddle1X : this.paddle2X, halfWidth, this.lastWidth - halfWidth);
+      if (paddle === 1) {
+        this.paddle1X = clamped;
+      } else {
+        this.paddle2X = clamped;
+      }
+    }
   }
 
   activateMultiBall(): void {
@@ -396,6 +406,7 @@ export class Game {
   update(dt: number, width: number, height: number): void {
     this.ensureInitialized(width, height);
     this.lastHeight = height;
+    this.lastWidth = width;
 
     if (this.speedBoostRemaining > 0) {
       this.speedBoostRemaining = Math.max(0, this.speedBoostRemaining - dt);
