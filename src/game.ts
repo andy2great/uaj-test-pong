@@ -26,10 +26,13 @@ export class Game {
   render(ctx: CanvasRenderingContext2D, width: number, height: number): void {
     ctx.clearRect(0, 0, width, height);
 
+    ctx.fillStyle = '#0a1128';
+    ctx.fillRect(0, 0, width, height);
+
     ctx.fillStyle = '#e8ecf5';
     ctx.textAlign = 'center';
     ctx.font = `${Math.round(height * 0.04)}px system-ui, sans-serif`;
-    ctx.fillText('Game shell ready', width / 2, height * 0.4);
+    ctx.fillText('Pong Test', width / 2, height * 0.4);
 
     const pulse = 1 + Math.sin(this.elapsed * 3) * 0.1;
     ctx.beginPath();
