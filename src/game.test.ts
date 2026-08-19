@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import {
   FAST_BALL_MULTIPLIER,
   Game,
+  GIANT_PADDLE_DURATION_SECONDS,
+  GIANT_PADDLE_MULTIPLIER,
+  MULTI_BALL_DURATION_SECONDS,
   PADDLE_MOVE_STEP_RATIO,
   POWER_UP_KINDS,
   POWER_UP_SPAWN_INTERVAL_SECONDS,
@@ -309,9 +312,11 @@ describe('Game scoring', () => {
 });
 
 describe('Game power-ups', () => {
-  it('registers both power-ups via the extensible kind registry', () => {
+  it('registers all four power-ups via the extensible kind registry', () => {
     expect(POWER_UP_KINDS).toContain('speed-boost');
     expect(POWER_UP_KINDS).toContain('fast-ball');
+    expect(POWER_UP_KINDS).toContain('giant-paddle');
+    expect(POWER_UP_KINDS).toContain('multi-ball');
   });
 
   it('spawns a power-up on the field once the spawn interval elapses during an active rally', () => {
@@ -428,5 +433,104 @@ describe('Game power-ups', () => {
     expect(game.activePowerUp).not.toBeNull();
     expect(game.ballVX).toBe(vx);
     expect(game.ballVY).toBe(vy);
+  });
+
+  it('activates the Giant Paddle effect, widening the collecting paddle, when the ball collides with it', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.lastPaddleTouch = 1;
+    game.activePowerUp = { id: 1, kind: 'giant-paddle', x: game.ballX, y: game.ballY };
+
+    game.update(0, 400, 800);
+
+    expect(game.activePowerUp).toBeNull();
+    expect(game.paddleWidthMultiplier1).toBe(GIANT_PADDLE_MULTIPLIER);
+    expect(game.giantPaddleRemaining).toBe(GIANT_PADDLE_DURATION_SECONDS);
+  });
+
+  it('keeps the wider paddle further from the canvas edge when clamped', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+
+    game.onPointerDown(1, -1000, 50, 400, 800);
+    const clampedNormal = game.paddle1X;
+
+    game.paddleWidthMultiplier1 = GIANT_PADDLE_MULTIPLIER;
+    game.onPointerDown(1, -1000, 50, 400, 800);
+    const clampedGiant = game.paddle1X;
+
+    expect(clampedGiant).toBeGreaterThan(clampedNormal);
+  });
+
+  it('reverts the Giant Paddle automatically once its duration elapses', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.lastPaddleTouch = 2;
+    game.activePowerUp = { id: 1, kind: 'giant-paddle', x: game.ballX, y: game.ballY };
+    game.ballVX = 0;
+    game.ballVY = 0; // freeze the ball so the rally does not end during the wait
+
+    game.update(0, 400, 800); // activates the effect
+    expect(game.paddleWidthMultiplier2).toBe(GIANT_PADDLE_MULTIPLIER);
+
+    game.update(GIANT_PADDLE_DURATION_SECONDS, 400, 800);
+
+    expect(game.paddleWidthMultiplier2).toBe(1);
+    expect(game.giantPaddleRemaining).toBe(0);
+  });
+
+  it('activates the Multi-Ball effect, putting an extra ball into play, when the ball collides with it', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.activePowerUp = { id: 1, kind: 'multi-ball', x: game.ballX, y: game.ballY };
+
+    game.update(0, 400, 800);
+
+    expect(game.activePowerUp).toBeNull();
+    expect(game.extraBalls).toHaveLength(1);
+    expect(game.extraBalls[0].vx !== 0 || game.extraBalls[0].vy !== 0).toBe(true);
+  });
+
+  it('moves the extra ball independently and lets it score a point for whichever side it exits past', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.extraBalls.push({ x: 200, y: 900, vx: 0, vy: 300, remaining: MULTI_BALL_DURATION_SECONDS });
+    game.ballVX = 0;
+    game.ballVY = 0; // freeze the primary ball so only the extra ball scores
+
+    game.update(0.001, 400, 800);
+
+    expect(game.score1).toBe(1);
+    expect(game.score2).toBe(0);
+    expect(game.extraBalls).toHaveLength(0);
+    // the primary ball keeps playing; only the extra ball was removed
+    expect(game.ballX).toBe(200);
+    expect(game.ballY).toBe(400);
+  });
+
+  it('removes the extra ball once its duration elapses, without affecting the score', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.extraBalls.push({ x: 200, y: 400, vx: 0, vy: 0, remaining: MULTI_BALL_DURATION_SECONDS });
+    game.ballVX = 0;
+    game.ballVY = 0; // freeze the primary ball so it doesn't score during the long wait
+
+    game.update(MULTI_BALL_DURATION_SECONDS, 400, 800);
+
+    expect(game.extraBalls).toHaveLength(0);
+    expect(game.score1).toBe(0);
+    expect(game.score2).toBe(0);
+  });
+
+  it('clears any extra balls once the primary ball ends the rally', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.extraBalls.push({ x: 200, y: 400, vx: 0, vy: 0, remaining: MULTI_BALL_DURATION_SECONDS });
+    game.ballY = -100;
+    game.ballVY = -300;
+
+    game.update(0.001, 400, 800); // primary ball exits and scores
+
+    expect(game.extraBalls).toHaveLength(0);
   });
 });
