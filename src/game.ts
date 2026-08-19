@@ -235,10 +235,10 @@ const POWER_UP_DEFINITIONS: PowerUpDefinition[] = [
 export const POWER_UP_KINDS: readonly PowerUpKind[] = POWER_UP_DEFINITIONS.map((entry) => entry.kind);
 
 const POWER_UP_VISUALS: Record<PowerUpKind, { color: string; label: string }> = {
-  'speed-boost': { color: '#ffd166', label: 'S' },
-  'fast-ball': { color: '#ff5b7f', label: 'F' },
-  'giant-paddle': { color: '#06d6a0', label: 'G' },
-  'multi-ball': { color: '#a78bfa', label: 'M' },
+  'speed-boost': { color: '#f4a261', label: 'S' },
+  'fast-ball': { color: '#e76f51', label: 'F' },
+  'giant-paddle': { color: '#8ecae6', label: 'G' },
+  'multi-ball': { color: '#c9a0f5', label: 'M' },
 };
 
 // Pure so it can be unit tested directly: given where the ball hit a paddle
@@ -912,9 +912,9 @@ export class Game {
     ctx.shadowBlur = paddleHeight * 1.4;
     ctx.shadowOffsetY = paddleHeight * 0.9;
     const gradient = ctx.createLinearGradient(x, y, x, y + paddleHeight);
-    gradient.addColorStop(0, '#ffffff');
-    gradient.addColorStop(0.45, '#c7d0e8');
-    gradient.addColorStop(1, '#8a93b8');
+    gradient.addColorStop(0, '#eaf2ff');
+    gradient.addColorStop(0.45, '#8ecae6');
+    gradient.addColorStop(1, '#2a6f97');
     ctx.fillStyle = gradient;
     ctx.fillRect(x, y, w, paddleHeight);
     ctx.restore();
