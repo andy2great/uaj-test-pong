@@ -495,6 +495,31 @@ describe('Game power-ups', () => {
     expect(game.score2).toBe(0); // player 2 must not be awarded an undeserved point
   });
 
+  it('does not register a paddle bounce when the X and Y bounding ranges overlap the band independently but the actual path passes to the side (issue #21)', () => {
+    const game = new Game();
+    game.update(0, 800, 400); // initialize
+
+    // Reproduces issue #21: at extreme stacked-Fast-Ball speed the ball's
+    // whole-frame X range and whole-frame Y range each independently overlap
+    // player 1's collision band (X = [288, 512], Y around the top margin),
+    // but the true straight-line path from (0, 396) to (~666.7, 4) crosses
+    // the paddle's Y-band at x =~ 626.5 -- well past the paddle's right edge
+    // -- so it must NOT be treated as a bounce.
+    game.paddle1X = 400;
+    game.ballX = 0;
+    game.ballY = 396;
+    game.ballVX = 40000;
+    game.ballVY = -23520;
+    game.lastPaddleTouch = null;
+
+    game.update(1 / 60, 800, 400);
+
+    expect(game.lastPaddleTouch).toBeNull(); // no bounce registered
+    expect(game.ballVY).toBeLessThan(0); // ball keeps travelling on its original diagonal, unreflected
+    expect(game.score1).toBe(0);
+    expect(game.score2).toBe(0);
+  });
+
   it('ignores a power-up the ball has not reached yet', () => {
     const game = new Game();
     game.update(0, 400, 800);

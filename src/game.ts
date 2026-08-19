@@ -101,6 +101,47 @@ export function reflectOffPaddle(
   };
 }
 
+// Returns the fraction-of-frame interval [tMin, tMax] (within [0, 1]) during
+// which a value moving linearly from `start` to `end` lies inside [lo, hi],
+// or null if it never does. Used to correlate the X and Y axes of a swept
+// collision check so a bounce only registers when both axes are in-band at
+// the *same instant*, not just independently at some point during the frame.
+function axisBandInterval(start: number, end: number, lo: number, hi: number): [number, number] | null {
+  if (start === end) {
+    return start >= lo && start <= hi ? [0, 1] : null;
+  }
+  const tLo = (lo - start) / (end - start);
+  const tHi = (hi - start) / (end - start);
+  const tMin = Math.max(0, Math.min(tLo, tHi));
+  const tMax = Math.min(1, Math.max(tLo, tHi));
+  return tMin <= tMax ? [tMin, tMax] : null;
+}
+
+// True when the ball's straight-line path this frame actually crosses the
+// given rectangular band (already expanded by the ball radius on both axes)
+// at a shared instant, rather than merely having independently-overlapping X
+// and Y bounding ranges over the whole frame.
+function pathCrossesBand(
+  startX: number,
+  endX: number,
+  xLo: number,
+  xHi: number,
+  startY: number,
+  endY: number,
+  yLo: number,
+  yHi: number,
+): boolean {
+  const xInterval = axisBandInterval(startX, endX, xLo, xHi);
+  if (xInterval === null) {
+    return false;
+  }
+  const yInterval = axisBandInterval(startY, endY, yLo, yHi);
+  if (yInterval === null) {
+    return false;
+  }
+  return Math.max(xInterval[0], yInterval[0]) <= Math.min(xInterval[1], yInterval[1]);
+}
+
 export class Game {
   paddle1X = 0; // player 1 (top) paddle center, in canvas pixels
   paddle2X = 0; // player 2 (bottom) paddle center, in canvas pixels
@@ -386,21 +427,18 @@ export class Game {
     const paddle2Y = height * (1 - PADDLE_MARGIN_RATIO);
     const speed = Math.hypot(ball.vx, ball.vy);
 
-    // Swept the same way as the Y-axis check above: use the pre-move and
-    // post-move X positions together so a frame whose horizontal path
-    // crosses the whole paddle band still registers a bounce even when the
-    // ball's single post-move X sample lands past it.
-    const overlapsPaddleX = (paddleX: number, paddleHalfWidth: number): boolean => {
-      const minX = Math.min(startX, ball.x) - radius;
-      const maxX = Math.max(startX, ball.x) + radius;
-      return maxX >= paddleX - paddleHalfWidth && minX <= paddleX + paddleHalfWidth;
-    };
-
     if (
       ball.vy < 0 &&
-      ball.y - radius <= paddle1Y + paddleHeight / 2 &&
-      startY + radius >= paddle1Y - paddleHeight / 2 &&
-      overlapsPaddleX(this.paddle1X, paddle1Width / 2)
+      pathCrossesBand(
+        startX,
+        ball.x,
+        this.paddle1X - paddle1Width / 2 - radius,
+        this.paddle1X + paddle1Width / 2 + radius,
+        startY,
+        ball.y,
+        paddle1Y - paddleHeight / 2 - radius,
+        paddle1Y + paddleHeight / 2 + radius,
+      )
     ) {
       ball.y = paddle1Y + paddleHeight / 2 + radius;
       const { vx, vy } = reflectOffPaddle(ball.x, this.paddle1X, paddle1Width, speed, true);
@@ -410,9 +448,16 @@ export class Game {
     }
     if (
       ball.vy > 0 &&
-      ball.y + radius >= paddle2Y - paddleHeight / 2 &&
-      startY - radius <= paddle2Y + paddleHeight / 2 &&
-      overlapsPaddleX(this.paddle2X, paddle2Width / 2)
+      pathCrossesBand(
+        startX,
+        ball.x,
+        this.paddle2X - paddle2Width / 2 - radius,
+        this.paddle2X + paddle2Width / 2 + radius,
+        startY,
+        ball.y,
+        paddle2Y - paddleHeight / 2 - radius,
+        paddle2Y + paddleHeight / 2 + radius,
+      )
     ) {
       ball.y = paddle2Y - paddleHeight / 2 - radius;
       const { vx, vy } = reflectOffPaddle(ball.x, this.paddle2X, paddle2Width, speed, false);
