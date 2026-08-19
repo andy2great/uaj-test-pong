@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { Game, clamp, reflectOffPaddle } from './game';
+import {
+  FAST_BALL_MULTIPLIER,
+  Game,
+  PADDLE_MOVE_STEP_RATIO,
+  POWER_UP_KINDS,
+  POWER_UP_SPAWN_INTERVAL_SECONDS,
+  SPEED_BOOST_DURATION_SECONDS,
+  SPEED_BOOST_MULTIPLIER,
+  clamp,
+  reflectOffPaddle,
+} from './game';
 
 describe('clamp', () => {
   it('returns the value when inside the range', () => {
@@ -295,5 +305,128 @@ describe('Game scoring', () => {
     expect(game.winner).toBeNull();
     expect(game.score1).toBe(0);
     expect(game.score2).toBe(0);
+  });
+});
+
+describe('Game power-ups', () => {
+  it('registers both power-ups via the extensible kind registry', () => {
+    expect(POWER_UP_KINDS).toContain('speed-boost');
+    expect(POWER_UP_KINDS).toContain('fast-ball');
+  });
+
+  it('spawns a power-up on the field once the spawn interval elapses during an active rally', () => {
+    const game = new Game();
+    game.update(0, 400, 800); // initializes and serves
+    game.ballVX = 0;
+    game.ballVY = 0; // freeze the ball so the rally never ends during the wait
+
+    expect(game.activePowerUp).toBeNull();
+    game.update(POWER_UP_SPAWN_INTERVAL_SECONDS, 400, 800);
+
+    expect(game.activePowerUp).not.toBeNull();
+    expect(POWER_UP_KINDS).toContain(game.activePowerUp!.kind);
+  });
+
+  it('does not spawn a power-up while the ball is off-screen during the post-point serve delay', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.ballY = -100;
+    game.ballVY = -300;
+    game.update(0.001, 400, 800); // scores the point and starts the serve delay
+
+    game.update(POWER_UP_SPAWN_INTERVAL_SECONDS, 400, 800); // long enough to spawn if it were active
+
+    expect(game.activePowerUp).toBeNull();
+  });
+
+  it('does not spawn a second power-up while one is already active', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.ballVX = 0;
+    game.ballVY = 0;
+    game.update(POWER_UP_SPAWN_INTERVAL_SECONDS, 400, 800);
+    const firstPowerUp = game.activePowerUp;
+    expect(firstPowerUp).not.toBeNull();
+
+    game.update(POWER_UP_SPAWN_INTERVAL_SECONDS, 400, 800);
+
+    expect(game.activePowerUp).toBe(firstPowerUp);
+  });
+
+  it('activates the Speed Boost effect and removes the icon when the ball collides with it', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.lastPaddleTouch = 1;
+    game.activePowerUp = { id: 1, kind: 'speed-boost', x: game.ballX, y: game.ballY };
+
+    game.update(0, 400, 800);
+
+    expect(game.activePowerUp).toBeNull();
+    expect(game.paddleSpeedMultiplier1).toBe(SPEED_BOOST_MULTIPLIER);
+    expect(game.speedBoostRemaining).toBe(SPEED_BOOST_DURATION_SECONDS);
+  });
+
+  it('increases how far a drag can move the boosted paddle in a single move event', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.onPointerDown(1, 200, 50, 400, 800); // registers the pointer as controlling paddle 1
+
+    game.paddle1X = 0; // simulate the paddle sitting at the far left edge
+    game.onPointerMove(1, 400, 400); // drag toward the far right edge, well beyond the step cap
+    const paddle1XAfterUnboosted = game.paddle1X;
+
+    game.paddle1X = 0;
+    game.paddleSpeedMultiplier1 = SPEED_BOOST_MULTIPLIER;
+    game.onPointerMove(1, 400, 400);
+    const paddle1XAfterBoosted = game.paddle1X;
+
+    expect(paddle1XAfterUnboosted).toBeCloseTo(400 * PADDLE_MOVE_STEP_RATIO);
+    expect(paddle1XAfterBoosted).toBeCloseTo(400 * PADDLE_MOVE_STEP_RATIO * SPEED_BOOST_MULTIPLIER);
+    expect(paddle1XAfterBoosted).toBeGreaterThan(paddle1XAfterUnboosted);
+  });
+
+  it('reverts the Speed Boost automatically once its duration elapses', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.lastPaddleTouch = 2;
+    game.activePowerUp = { id: 1, kind: 'speed-boost', x: game.ballX, y: game.ballY };
+    game.ballVX = 0;
+    game.ballVY = 0; // freeze the ball so the rally does not end during the wait
+
+    game.update(0, 400, 800); // activates the boost
+    expect(game.paddleSpeedMultiplier2).toBe(SPEED_BOOST_MULTIPLIER);
+
+    game.update(SPEED_BOOST_DURATION_SECONDS, 400, 800);
+
+    expect(game.paddleSpeedMultiplier2).toBe(1);
+    expect(game.speedBoostRemaining).toBe(0);
+  });
+
+  it('activates the Fast Ball effect, multiplying the current ball speed, when the ball collides with it', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.ballVX = 100;
+    game.ballVY = -200;
+    game.activePowerUp = { id: 1, kind: 'fast-ball', x: game.ballX, y: game.ballY };
+
+    game.update(0, 400, 800);
+
+    expect(game.activePowerUp).toBeNull();
+    expect(game.ballVX).toBeCloseTo(100 * FAST_BALL_MULTIPLIER);
+    expect(game.ballVY).toBeCloseTo(-200 * FAST_BALL_MULTIPLIER);
+  });
+
+  it('ignores a power-up the ball has not reached yet', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.activePowerUp = { id: 1, kind: 'fast-ball', x: game.ballX + 1000, y: game.ballY + 1000 };
+    const vx = game.ballVX;
+    const vy = game.ballVY;
+
+    game.update(0, 400, 800);
+
+    expect(game.activePowerUp).not.toBeNull();
+    expect(game.ballVX).toBe(vx);
+    expect(game.ballVY).toBe(vy);
   });
 });
