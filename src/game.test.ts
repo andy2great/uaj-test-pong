@@ -11,6 +11,7 @@ import {
   SPEED_BOOST_DURATION_SECONDS,
   SPEED_BOOST_MULTIPLIER,
   clamp,
+  orbitPosition,
   reflectOffPaddle,
 } from './game';
 
@@ -53,6 +54,58 @@ describe('reflectOffPaddle', () => {
     const beyondEdge = reflectOffPaddle(500, 100, 80, 300, true);
     expect(beyondEdge.vx).toBeCloseTo(atEdge.vx);
     expect(beyondEdge.vy).toBeCloseTo(atEdge.vy);
+  });
+});
+
+describe('orbitPosition', () => {
+  it('starts at the phase angle when time is zero', () => {
+    const { x, y } = orbitPosition(100, 100, 50, 1, 0, 0);
+    expect(x).toBeCloseTo(150);
+    expect(y).toBeCloseTo(100);
+  });
+
+  it('advances around the orbit as time increases', () => {
+    const start = orbitPosition(100, 100, 50, 1, 0, 0);
+    const later = orbitPosition(100, 100, 50, 1, 0, 1);
+    expect(later.x).not.toBeCloseTo(start.x);
+  });
+
+  it('moves in the opposite direction for a negative angular speed', () => {
+    const positiveSpeed = orbitPosition(0, 0, 50, 1, 0, 0.5);
+    const negativeSpeed = orbitPosition(0, 0, 50, -1, 0, 0.5);
+    expect(positiveSpeed.y).toBeCloseTo(-negativeSpeed.y);
+  });
+});
+
+describe('Game backdrop', () => {
+  it('advances backdropTime by dt on every update', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    expect(game.backdropTime).toBe(0);
+
+    game.update(0.5, 400, 800);
+    expect(game.backdropTime).toBeCloseTo(0.5);
+
+    game.update(0.25, 400, 800);
+    expect(game.backdropTime).toBeCloseTo(0.75);
+  });
+
+  it('keeps advancing after the match ends, without affecting the score', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    for (let i = 0; i < 11; i += 1) {
+      game.ballY = 900;
+      game.ballVY = 300;
+      game.update(0.001, 400, 800);
+      game.update(2, 400, 800);
+    }
+    expect(game.winner).toBe(1);
+
+    const timeBefore = game.backdropTime;
+    game.update(1, 400, 800);
+
+    expect(game.backdropTime).toBeGreaterThan(timeBefore);
+    expect(game.score1).toBe(11);
   });
 });
 
