@@ -129,6 +129,14 @@ const HUD_PANEL_RADIUS_RATIO = 0.28; // corner radius, fraction of panel height
 export const PADDLE_MOVE_STEP_RATIO = 0.05; // max fraction of canvas width a paddle may travel per drag event
 export const POWER_UP_SPAWN_INTERVAL_SECONDS = 6; // gap between power-up spawns during an active rally
 const POWER_UP_RADIUS_RATIO = 0.03; // fraction of canvas height
+
+// Idle pulse/bob tuning (purely cosmetic -- driven by `backdropTime`, never
+// touches POWER_UP_RADIUS_RATIO or the pickup's collision position).
+const POWER_UP_GLOW_RADIUS_RATIO = 2.4; // glow radius, multiple of pickup radius
+const POWER_UP_PULSE_SPEED = 2.6; // radians/sec
+const POWER_UP_PULSE_SCALE_RATIO = 0.1; // +/- fraction of radius the pickup breathes by
+const POWER_UP_BOB_SPEED = 1.7; // radians/sec
+const POWER_UP_BOB_RATIO = 0.3; // bob amplitude, multiple of pickup radius
 export const SPEED_BOOST_MULTIPLIER = 1.6;
 export const SPEED_BOOST_DURATION_SECONDS = 5;
 export const FAST_BALL_MULTIPLIER = 1.35;
@@ -275,11 +283,11 @@ const POWER_UP_DEFINITIONS: PowerUpDefinition[] = [
 
 export const POWER_UP_KINDS: readonly PowerUpKind[] = POWER_UP_DEFINITIONS.map((entry) => entry.kind);
 
-const POWER_UP_VISUALS: Record<PowerUpKind, { color: string; label: string }> = {
-  'speed-boost': { color: '#f4a261', label: 'S' },
-  'fast-ball': { color: '#e76f51', label: 'F' },
-  'giant-paddle': { color: '#8ecae6', label: 'G' },
-  'multi-ball': { color: '#c9a0f5', label: 'M' },
+const POWER_UP_VISUALS: Record<PowerUpKind, { color: string; highlight: string; glow: string; label: string }> = {
+  'speed-boost': { color: '#f4a261', highlight: '#ffe0b3', glow: 'rgba(244, 162, 97, 0.55)', label: 'S' },
+  'fast-ball': { color: '#e76f51', highlight: '#ffb59e', glow: 'rgba(231, 111, 81, 0.55)', label: 'F' },
+  'giant-paddle': { color: '#8ecae6', highlight: '#e0f4ff', glow: 'rgba(142, 202, 230, 0.55)', label: 'G' },
+  'multi-ball': { color: '#c9a0f5', highlight: '#ecdcff', glow: 'rgba(201, 160, 245, 0.55)', label: 'M' },
 };
 
 // Pure so it can be unit tested directly: given where the ball hit a paddle
@@ -1223,15 +1231,32 @@ export class Game {
     if (this.activePowerUp !== null) {
       const powerUpRadius = height * POWER_UP_RADIUS_RATIO;
       const visual = POWER_UP_VISUALS[this.activePowerUp.kind];
+      const pulse = 0.5 + 0.5 * Math.sin(this.backdropTime * POWER_UP_PULSE_SPEED);
+      const drawRadius = powerUpRadius * (1 + POWER_UP_PULSE_SCALE_RATIO * pulse);
+      const drawX = this.activePowerUp.x;
+      const drawY = this.activePowerUp.y + Math.sin(this.backdropTime * POWER_UP_BOB_SPEED) * powerUpRadius * POWER_UP_BOB_RATIO;
+
+      const glowGradient = ctx.createRadialGradient(drawX, drawY, 0, drawX, drawY, drawRadius * POWER_UP_GLOW_RADIUS_RATIO);
+      glowGradient.addColorStop(0, visual.glow);
+      glowGradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = glowGradient;
       ctx.beginPath();
-      ctx.arc(this.activePowerUp.x, this.activePowerUp.y, powerUpRadius, 0, Math.PI * 2);
-      ctx.fillStyle = visual.color;
+      ctx.arc(drawX, drawY, drawRadius * POWER_UP_GLOW_RADIUS_RATIO, 0, Math.PI * 2);
       ctx.fill();
+
+      const coreGradient = ctx.createRadialGradient(drawX - drawRadius * 0.3, drawY - drawRadius * 0.3, 0, drawX, drawY, drawRadius);
+      coreGradient.addColorStop(0, visual.highlight);
+      coreGradient.addColorStop(1, visual.color);
+      ctx.fillStyle = coreGradient;
+      ctx.beginPath();
+      ctx.arc(drawX, drawY, drawRadius, 0, Math.PI * 2);
+      ctx.fill();
+
       ctx.fillStyle = '#0a1128';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      applyTextStyle(ctx, 'primary', powerUpRadius * 1.2);
-      ctx.fillText(visual.label, this.activePowerUp.x, this.activePowerUp.y);
+      applyTextStyle(ctx, 'primary', drawRadius * 1.2);
+      ctx.fillText(visual.label, drawX, drawY);
     }
 
     ctx.save();
