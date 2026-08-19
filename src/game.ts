@@ -343,6 +343,12 @@ export class Game {
     if (dx * dx + dy * dy > collisionRadius * collisionRadius) {
       return;
     }
+    // Speed Boost and Giant Paddle attribute their effect to whichever
+    // paddle last touched the ball. If neither paddle has touched it yet,
+    // leave the icon in play instead of silently consuming it for nothing.
+    if ((powerUp.kind === 'speed-boost' || powerUp.kind === 'giant-paddle') && this.lastPaddleTouch === null) {
+      return;
+    }
     this.activePowerUp = null;
     const definition = POWER_UP_DEFINITIONS.find((entry) => entry.kind === powerUp.kind);
     definition?.activate(this);
