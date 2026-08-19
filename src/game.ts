@@ -170,13 +170,21 @@ const STARS: Star[] = Array.from({ length: STAR_COUNT }, (_, i) => ({
 // Orbiting planets drift behind the play field, evoking a slow solar-system
 // backdrop. Orbit center is fixed as a fraction of canvas size so it holds up
 // across the portrait aspect ratios the game supports.
+interface PlanetRing {
+  color: string;
+  radiusXRatio: number; // ring radius (x-axis), fraction of planet radius
+  radiusYRatio: number; // ring radius (y-axis), fraction of planet radius
+  tilt: number; // ring rotation, radians
+}
 interface PlanetConfig {
   colorNear: string;
   colorFar: string;
+  bandColor: string; // subtle surface-band overlay tint
   radiusRatio: number; // planet radius, fraction of canvas height
   orbitRadiusRatio: number; // orbit radius, fraction of min(width, height)
   angularSpeed: number; // radians per second
   phase: number; // initial angle offset
+  ring?: PlanetRing;
 }
 const ORBIT_CENTER_X_RATIO = 0.5;
 const ORBIT_CENTER_Y_RATIO = 0.38;
@@ -184,14 +192,17 @@ const PLANETS: PlanetConfig[] = [
   {
     colorNear: '#f4a261',
     colorFar: '#9c4f21',
+    bandColor: '#fff3e0',
     radiusRatio: 0.05,
     orbitRadiusRatio: 0.55,
     angularSpeed: 0.12,
     phase: 0,
+    ring: { color: '#e9c893', radiusXRatio: 1.9, radiusYRatio: 0.55, tilt: -0.35 },
   },
   {
     colorNear: '#8ecae6',
     colorFar: '#2a6f97',
+    bandColor: '#eaf7ff',
     radiusRatio: 0.032,
     orbitRadiusRatio: 0.32,
     angularSpeed: -0.2,
@@ -200,6 +211,7 @@ const PLANETS: PlanetConfig[] = [
   {
     colorNear: '#c9a0f5',
     colorFar: '#5e3b8f',
+    bandColor: '#f4e9ff',
     radiusRatio: 0.022,
     orbitRadiusRatio: 0.75,
     angularSpeed: 0.07,
@@ -881,7 +893,7 @@ export class Game {
     const centerX = width * ORBIT_CENTER_X_RATIO;
     const centerY = height * ORBIT_CENTER_Y_RATIO;
     const minSide = Math.min(width, height);
-    for (const planet of PLANETS) {
+    PLANETS.forEach((planet, planetIndex) => {
       const { x, y } = orbitPosition(
         centerX,
         centerY,
@@ -891,6 +903,11 @@ export class Game {
         this.backdropTime,
       );
       const radius = planet.radiusRatio * height;
+
+      if (planet.ring) {
+        this.renderPlanetRing(ctx, x, y, radius, planet.ring, 'back');
+      }
+
       const gradient = ctx.createRadialGradient(x - radius * 0.3, y - radius * 0.3, radius * 0.1, x, y, radius);
       gradient.addColorStop(0, planet.colorNear);
       gradient.addColorStop(1, planet.colorFar);
@@ -898,7 +915,79 @@ export class Game {
       ctx.beginPath();
       ctx.arc(x, y, radius, 0, Math.PI * 2);
       ctx.fill();
+
+      // Surface bands + a day/night terminator, both clipped to the planet's
+      // disc, are what turn the flat gradient fill into something that reads
+      // as a lit sphere with texture rather than a plain shaded ball.
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.clip();
+
+      const bandCount = 4;
+      ctx.fillStyle = planet.bandColor;
+      for (let band = 0; band < bandCount; band++) {
+        const bandSeed = planetIndex * 19.7 + band * 7.3;
+        const bandY = y - radius + hash01(bandSeed + 61) * radius * 2;
+        const bandHeight = radius * (0.12 + hash01(bandSeed + 67) * 0.22);
+        ctx.globalAlpha = 0.1 + hash01(bandSeed + 73) * 0.16;
+        ctx.fillRect(x - radius, bandY, radius * 2, bandHeight);
+      }
+
+      const shadowCenterX = x + radius * 0.45;
+      const shadowCenterY = y + radius * 0.45;
+      const terminator = ctx.createRadialGradient(
+        shadowCenterX,
+        shadowCenterY,
+        radius * 0.15,
+        shadowCenterX,
+        shadowCenterY,
+        radius * 1.3,
+      );
+      terminator.addColorStop(0, 'rgba(6, 8, 24, 0)');
+      terminator.addColorStop(1, 'rgba(6, 8, 24, 0.6)');
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = terminator;
+      ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+      ctx.restore();
+      ctx.globalAlpha = 1;
+
+      if (planet.ring) {
+        this.renderPlanetRing(ctx, x, y, radius, planet.ring, 'front');
+      }
+    });
+  }
+
+  // Draws one half of a planet's ring, clipped above/below the planet's
+  // center so the ring can be layered behind the planet on one call and in
+  // front of it on another -- giving the ring proper depth around the disc.
+  private renderPlanetRing(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    planetRadius: number,
+    ring: PlanetRing,
+    side: 'back' | 'front',
+  ): void {
+    const radiusX = planetRadius * ring.radiusXRatio;
+    const radiusY = planetRadius * ring.radiusYRatio;
+    const clipMargin = radiusX * 2;
+    ctx.save();
+    ctx.beginPath();
+    if (side === 'back') {
+      ctx.rect(x - clipMargin, y - clipMargin, clipMargin * 2, clipMargin);
+    } else {
+      ctx.rect(x - clipMargin, y, clipMargin * 2, clipMargin);
     }
+    ctx.clip();
+    ctx.beginPath();
+    ctx.ellipse(x, y, radiusX, radiusY, ring.tilt, 0, Math.PI * 2);
+    ctx.strokeStyle = ring.color;
+    ctx.globalAlpha = 0.75;
+    ctx.lineWidth = Math.max(1, planetRadius * 0.12);
+    ctx.stroke();
+    ctx.restore();
+    ctx.globalAlpha = 1;
   }
 
   // Draws the ball as an Outer Wilds-style comet: a glowing core plus a tail
