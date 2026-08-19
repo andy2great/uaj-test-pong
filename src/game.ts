@@ -44,6 +44,14 @@ const IMPACT_PARTICLE_COUNT = 6;
 const SERVE_COUNTDOWN_RING_MAX_RADIUS_RATIO = 6; // ring's starting radius, multiple of ball radius
 const SERVE_COUNTDOWN_RING_LINE_WIDTH_RATIO = 0.35; // ring stroke width, multiple of ball radius
 
+// Paddle buff indicators: purely cosmetic bars drawn on the outer side of a
+// buffed paddle, read from `speedBoostRemaining*`/`giantPaddleRemaining*` and
+// scaled against the matching *_DURATION_SECONDS constant. They never feed
+// back into `paddleSpeedMultiplier*`/`paddleWidthMultiplier*` or collisions.
+const BUFF_INDICATOR_HEIGHT_RATIO = 0.4; // bar thickness, multiple of paddle height
+const BUFF_INDICATOR_GAP_RATIO = 1.6; // gap from paddle edge to first bar, multiple of paddle height
+const BUFF_INDICATOR_SPACING_RATIO = 1.2; // gap between stacked bars, multiple of paddle height
+
 // Pointermove events fire often enough during a real drag that this cap is
 // imperceptible in normal play; it only becomes visible (and boostable) when
 // a power-up scales it up.
@@ -861,6 +869,76 @@ export class Game {
     ctx.fillRect(x + w * 0.06, y + paddleHeight * 0.12, w * 0.88, paddleHeight * 0.22);
   }
 
+  // Draws one shrinking buff bar on the outer side of a paddle (above paddle 1,
+  // below paddle 2), stacked by `slot` when a paddle carries more than one
+  // active buff. `progress` is remaining/duration, so the bar empties exactly
+  // as the buff expires.
+  private renderBuffIndicator(
+    ctx: CanvasRenderingContext2D,
+    centerX: number,
+    edgeY: number,
+    direction: 1 | -1,
+    halfWidth: number,
+    paddleHeight: number,
+    slot: number,
+    progress: number,
+    color: string,
+  ): void {
+    const barHeight = paddleHeight * BUFF_INDICATOR_HEIGHT_RATIO;
+    const offset = paddleHeight * (BUFF_INDICATOR_GAP_RATIO + slot * BUFF_INDICATOR_SPACING_RATIO);
+    const y = edgeY + direction * offset;
+    const barWidth = halfWidth * 2 * clamp(progress, 0, 1);
+    ctx.fillStyle = color;
+    ctx.fillRect(centerX - barWidth / 2, y - barHeight / 2, barWidth, barHeight);
+  }
+
+  // Renders the buff bars for one paddle: a distinct color per buff type,
+  // reading `speedBoostRemaining*`/`giantPaddleRemaining*` without touching
+  // the multipliers those fields also gate.
+  private renderPaddleBuffs(
+    ctx: CanvasRenderingContext2D,
+    paddle: PaddleId,
+    centerX: number,
+    edgeY: number,
+    halfWidth: number,
+    paddleHeight: number,
+  ): void {
+    const direction: 1 | -1 = paddle === 1 ? -1 : 1;
+    let slot = 0;
+    const speedRemaining = paddle === 1 ? this.speedBoostRemaining1 : this.speedBoostRemaining2;
+    if (speedRemaining > 0) {
+      const progress = speedRemaining / SPEED_BOOST_DURATION_SECONDS;
+      this.renderBuffIndicator(
+        ctx,
+        centerX,
+        edgeY,
+        direction,
+        halfWidth,
+        paddleHeight,
+        slot,
+        progress,
+        POWER_UP_VISUALS['speed-boost'].color,
+      );
+      slot += 1;
+    }
+    const giantRemaining = paddle === 1 ? this.giantPaddleRemaining1 : this.giantPaddleRemaining2;
+    if (giantRemaining > 0) {
+      const progress = giantRemaining / GIANT_PADDLE_DURATION_SECONDS;
+      this.renderBuffIndicator(
+        ctx,
+        centerX,
+        edgeY,
+        direction,
+        halfWidth,
+        paddleHeight,
+        slot,
+        progress,
+        POWER_UP_VISUALS['giant-paddle'].color,
+      );
+      slot += 1;
+    }
+  }
+
   // Draws active collision flashes/particle bursts (see `impacts`); each one
   // fades and expands as `impact.age` approaches IMPACT_DURATION_SECONDS.
   private renderImpacts(ctx: CanvasRenderingContext2D, height: number): void {
@@ -928,6 +1006,8 @@ export class Game {
 
     this.renderPaddle(ctx, this.paddle1X, paddle1Y, paddle1HalfWidth, paddleHeight);
     this.renderPaddle(ctx, this.paddle2X, paddle2Y, paddle2HalfWidth, paddleHeight);
+    this.renderPaddleBuffs(ctx, 1, this.paddle1X, paddle1Y, paddle1HalfWidth, paddleHeight);
+    this.renderPaddleBuffs(ctx, 2, this.paddle2X, paddle2Y, paddle2HalfWidth, paddleHeight);
 
     const ballRadius = height * BALL_RADIUS_RATIO;
     const cometBaseSpeed = height * BALL_SPEED_RATIO;
