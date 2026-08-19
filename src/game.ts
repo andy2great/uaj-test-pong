@@ -158,6 +158,11 @@ interface Impact {
   kind: ImpactKind;
 }
 
+// Emitted by update() whenever an event `main.ts` may want to react to (e.g.
+// with haptic feedback) occurs. Drained via consumeHapticEvents() so this
+// file never touches the Vibration API or any other DOM global itself.
+export type HapticEventKind = 'paddle-hit' | 'score' | 'power-up';
+
 export type PowerUpKind = 'speed-boost' | 'fast-ball' | 'giant-paddle' | 'multi-ball';
 
 export interface PowerUp {
@@ -276,6 +281,7 @@ export class Game {
   extraBalls: ExtraBall[] = [];
   impacts: Impact[] = []; // active collision flashes/particle bursts, decayed in update()
   backdropTime = 0; // seconds elapsed, drives the starfield twinkle and planet orbits
+  private hapticEvents: HapticEventKind[] = []; // queued since the last consumeHapticEvents() call
 
   private initialized = false;
   private serveDelayRemaining = 0;
@@ -333,6 +339,7 @@ export class Game {
   // Centers the ball with zero velocity and starts the pre-serve pause.
   private awardPoint(scorer: PaddleId, width: number, height: number): void {
     this.addScore(scorer);
+    this.hapticEvents.push('score');
 
     this.ballX = width / 2;
     this.ballY = height / 2;
@@ -364,11 +371,23 @@ export class Game {
     this.giantPaddleRemaining2 = 0;
     this.extraBalls = [];
     this.impacts = [];
+    this.hapticEvents = [];
     this.serve(width, height);
   }
 
   private spawnImpact(x: number, y: number, kind: ImpactKind): void {
     this.impacts.push({ x, y, age: 0, kind });
+  }
+
+  // Drains and returns the haptic events queued since the last call, for
+  // `main.ts` to translate into navigator.vibrate() patterns.
+  consumeHapticEvents(): HapticEventKind[] {
+    if (this.hapticEvents.length === 0) {
+      return this.hapticEvents;
+    }
+    const events = this.hapticEvents;
+    this.hapticEvents = [];
+    return events;
   }
 
   onPointerDown(pointerId: number, x: number, y: number, width: number, height: number): void {
@@ -508,6 +527,7 @@ export class Game {
       return;
     }
     this.activePowerUp = null;
+    this.hapticEvents.push('power-up');
     const definition = POWER_UP_DEFINITIONS.find((entry) => entry.kind === powerUp.kind);
     definition?.activate(this);
   }
@@ -569,6 +589,7 @@ export class Game {
         ball.vx = vx;
         ball.vy = vy;
         this.spawnImpact(ball.x, ball.y, 'paddle');
+        this.hapticEvents.push('paddle-hit');
         return 1;
       }
       if (
@@ -590,6 +611,7 @@ export class Game {
         ball.vx = vx;
         ball.vy = vy;
         this.spawnImpact(ball.x, ball.y, 'paddle');
+        this.hapticEvents.push('paddle-hit');
         return 2;
       }
 
