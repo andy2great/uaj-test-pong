@@ -365,6 +365,7 @@ export class Game {
     // rather than its post-move one: that way a frame whose path crosses the
     // whole band still registers a bounce even if the ball ends up past it.
     const startY = ball.y;
+    const startX = ball.x;
     ball.x += ball.vx * dt;
     ball.y += ball.vy * dt;
 
@@ -385,8 +386,15 @@ export class Game {
     const paddle2Y = height * (1 - PADDLE_MARGIN_RATIO);
     const speed = Math.hypot(ball.vx, ball.vy);
 
-    const overlapsPaddleX = (paddleX: number, paddleHalfWidth: number): boolean =>
-      ball.x + radius >= paddleX - paddleHalfWidth && ball.x - radius <= paddleX + paddleHalfWidth;
+    // Swept the same way as the Y-axis check above: use the pre-move and
+    // post-move X positions together so a frame whose horizontal path
+    // crosses the whole paddle band still registers a bounce even when the
+    // ball's single post-move X sample lands past it.
+    const overlapsPaddleX = (paddleX: number, paddleHalfWidth: number): boolean => {
+      const minX = Math.min(startX, ball.x) - radius;
+      const maxX = Math.max(startX, ball.x) + radius;
+      return maxX >= paddleX - paddleHalfWidth && minX <= paddleX + paddleHalfWidth;
+    };
 
     if (
       ball.vy < 0 &&

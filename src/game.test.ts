@@ -474,6 +474,27 @@ describe('Game power-ups', () => {
     expect(game.score2).toBe(0); // player 2 must not be awarded an undeserved point
   });
 
+  it('still bounces off a paddle when a stacked Fast Ball speed would otherwise tunnel through it horizontally', () => {
+    const game = new Game();
+    game.update(0, 400, 800); // initialize
+
+    // Reproduces issue #19: the ball starts dead-center in X on player 1's
+    // paddle (band = [131.2, 268.8]) just below its Y band, with enough
+    // horizontal speed (comparable to ~8 stacked Fast Ball pickups) that a
+    // single 1/60s frame would carry it clean past the opposite edge under
+    // an end-of-frame-only X check.
+    game.paddle1X = 200;
+    game.ballX = 200;
+    game.ballY = 68.5;
+    game.ballVX = 6000;
+    game.ballVY = -2663.5;
+
+    game.update(1 / 60, 400, 800);
+
+    expect(game.ballVY).toBeGreaterThan(0); // rebounds downward instead of tunneling through
+    expect(game.score2).toBe(0); // player 2 must not be awarded an undeserved point
+  });
+
   it('ignores a power-up the ball has not reached yet', () => {
     const game = new Game();
     game.update(0, 400, 800);
