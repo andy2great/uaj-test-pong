@@ -361,7 +361,7 @@ export class Game {
     const paddleHeight = height * PADDLE_HEIGHT_RATIO;
     const paddle1Y = height * PADDLE_MARGIN_RATIO;
     const paddle2Y = height * (1 - PADDLE_MARGIN_RATIO);
-    const speed = height * BALL_SPEED_RATIO;
+    const speed = Math.hypot(ball.vx, ball.vy);
 
     const overlapsPaddleX = (paddleX: number, paddleHalfWidth: number): boolean =>
       ball.x + radius >= paddleX - paddleHalfWidth && ball.x - radius <= paddleX + paddleHalfWidth;
