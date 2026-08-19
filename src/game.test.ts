@@ -468,6 +468,23 @@ describe('Game power-ups', () => {
     expect(game.giantPaddleRemaining).toBe(GIANT_PADDLE_DURATION_SECONDS);
   });
 
+  it('re-clamps a paddle sitting at the edge so it stays fully on-canvas when Giant Paddle activates', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.onPointerDown(1, -1000, 50, 400, 800); // drag paddle 1 flush against the left edge
+    const halfWidthNormal = 400 * 0.28 * 1 * 0.5;
+    expect(game.paddle1X).toBeCloseTo(halfWidthNormal);
+
+    game.lastPaddleTouch = 1;
+    game.activePowerUp = { id: 1, kind: 'giant-paddle', x: game.ballX, y: game.ballY };
+    game.update(0, 400, 800); // ball collects the power-up while the paddle is still at the edge
+
+    const halfWidthGiant = 400 * 0.28 * GIANT_PADDLE_MULTIPLIER * 0.5;
+    expect(game.paddleWidthMultiplier1).toBe(GIANT_PADDLE_MULTIPLIER);
+    expect(game.paddle1X).toBeGreaterThanOrEqual(halfWidthGiant);
+    expect(game.paddle1X - halfWidthGiant).toBeCloseTo(0); // left edge of the paddle sits at x=0, not negative
+  });
+
   it('keeps the wider paddle further from the canvas edge when clamped', () => {
     const game = new Game();
     game.update(0, 400, 800);
