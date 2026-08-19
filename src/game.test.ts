@@ -368,7 +368,7 @@ describe('Game power-ups', () => {
 
     expect(game.activePowerUp).toBeNull();
     expect(game.paddleSpeedMultiplier1).toBe(SPEED_BOOST_MULTIPLIER);
-    expect(game.speedBoostRemaining).toBe(SPEED_BOOST_DURATION_SECONDS);
+    expect(game.speedBoostRemaining1).toBe(SPEED_BOOST_DURATION_SECONDS);
   });
 
   it('increases how far a drag can move the boosted paddle in a single move event', () => {
@@ -404,7 +404,7 @@ describe('Game power-ups', () => {
     game.update(SPEED_BOOST_DURATION_SECONDS, 400, 800);
 
     expect(game.paddleSpeedMultiplier2).toBe(1);
-    expect(game.speedBoostRemaining).toBe(0);
+    expect(game.speedBoostRemaining2).toBe(0);
   });
 
   it('leaves the Speed Boost icon uncollected if no paddle has touched the ball yet', () => {
@@ -418,7 +418,29 @@ describe('Game power-ups', () => {
     expect(game.activePowerUp).not.toBeNull();
     expect(game.paddleSpeedMultiplier1).toBe(1);
     expect(game.paddleSpeedMultiplier2).toBe(1);
-    expect(game.speedBoostRemaining).toBe(0);
+    expect(game.speedBoostRemaining1).toBe(0);
+    expect(game.speedBoostRemaining2).toBe(0);
+  });
+
+  it('lets each paddle keep an independent Speed Boost expiry (issue #25)', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.ballVX = 0;
+    game.ballVY = 0; // freeze the ball so the rally does not end during the wait
+
+    game.lastPaddleTouch = 1;
+    game.activateSpeedBoost();
+    expect(game.paddleSpeedMultiplier1).toBe(SPEED_BOOST_MULTIPLIER);
+
+    game.update(2, 400, 800); // 2s into paddle 1's 5s boost
+    game.lastPaddleTouch = 2;
+    game.activateSpeedBoost();
+    expect(game.paddleSpeedMultiplier2).toBe(SPEED_BOOST_MULTIPLIER);
+
+    game.update(6, 400, 800); // well past both paddles' 5s windows
+
+    expect(game.paddleSpeedMultiplier1).toBe(1);
+    expect(game.paddleSpeedMultiplier2).toBe(1);
   });
 
   it('activates the Fast Ball effect, multiplying the current ball speed, when the ball collides with it', () => {
@@ -570,7 +592,7 @@ describe('Game power-ups', () => {
 
     expect(game.activePowerUp).toBeNull();
     expect(game.paddleWidthMultiplier1).toBe(GIANT_PADDLE_MULTIPLIER);
-    expect(game.giantPaddleRemaining).toBe(GIANT_PADDLE_DURATION_SECONDS);
+    expect(game.giantPaddleRemaining1).toBe(GIANT_PADDLE_DURATION_SECONDS);
   });
 
   it('leaves the Giant Paddle icon uncollected if no paddle has touched the ball yet', () => {
@@ -584,7 +606,8 @@ describe('Game power-ups', () => {
     expect(game.activePowerUp).not.toBeNull();
     expect(game.paddleWidthMultiplier1).toBe(1);
     expect(game.paddleWidthMultiplier2).toBe(1);
-    expect(game.giantPaddleRemaining).toBe(0);
+    expect(game.giantPaddleRemaining1).toBe(0);
+    expect(game.giantPaddleRemaining2).toBe(0);
   });
 
   it('re-clamps a paddle sitting at the edge so it stays fully on-canvas when Giant Paddle activates', () => {
@@ -632,7 +655,28 @@ describe('Game power-ups', () => {
     game.update(GIANT_PADDLE_DURATION_SECONDS, 400, 800);
 
     expect(game.paddleWidthMultiplier2).toBe(1);
-    expect(game.giantPaddleRemaining).toBe(0);
+    expect(game.giantPaddleRemaining2).toBe(0);
+  });
+
+  it('lets each paddle keep an independent Giant Paddle expiry (issue #25)', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.ballVX = 0;
+    game.ballVY = 0; // freeze the ball so the rally does not end during the wait
+
+    game.lastPaddleTouch = 1;
+    game.activateGiantPaddle();
+    expect(game.paddleWidthMultiplier1).toBe(GIANT_PADDLE_MULTIPLIER);
+
+    game.update(2, 400, 800); // 2s into paddle 1's 5s boost
+    game.lastPaddleTouch = 2;
+    game.activateGiantPaddle();
+    expect(game.paddleWidthMultiplier2).toBe(GIANT_PADDLE_MULTIPLIER);
+
+    game.update(6, 400, 800); // well past both paddles' 5s windows
+
+    expect(game.paddleWidthMultiplier1).toBe(1);
+    expect(game.paddleWidthMultiplier2).toBe(1);
   });
 
   it('activates the Multi-Ball effect, putting an extra ball into play, when the ball collides with it', () => {
