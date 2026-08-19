@@ -364,6 +364,53 @@ describe('Game scoring', () => {
   });
 });
 
+describe('Game win celebration', () => {
+  it('starts the win celebration timer at zero and advances it once the match is won', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    for (let i = 0; i < 10; i += 1) {
+      game.ballY = 900;
+      game.ballVY = 300;
+      game.update(0.001, 400, 800);
+      game.update(2, 400, 800);
+    }
+    expect(game.winner).toBeNull();
+
+    game.ballY = 900;
+    game.ballVY = 300;
+    game.update(0.001, 400, 800); // the winning point
+
+    expect(game.winner).toBe(1);
+    expect(game.winCelebrationElapsed).toBe(0);
+
+    game.update(0.5, 400, 800);
+    expect(game.winCelebrationElapsed).toBeCloseTo(0.5);
+
+    game.update(0.5, 400, 800);
+    expect(game.winCelebrationElapsed).toBeCloseTo(1);
+  });
+
+  it('resets the win celebration timer when the match restarts, without affecting score/winner logic', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    for (let i = 0; i < 11; i += 1) {
+      game.ballY = 900;
+      game.ballVY = 300;
+      game.update(0.001, 400, 800);
+      game.update(2, 400, 800);
+    }
+    expect(game.winner).toBe(1);
+    expect(game.winCelebrationElapsed).toBeGreaterThan(0);
+
+    game.onPointerDown(1, 200, 400, 400, 800);
+
+    expect(game.winner).toBeNull();
+    expect(game.score1).toBe(0);
+    expect(game.score2).toBe(0);
+    expect(game.winCelebrationElapsed).toBe(0);
+  });
+});
+
 describe('Game power-ups', () => {
   it('registers all four power-ups via the extensible kind registry', () => {
     expect(POWER_UP_KINDS).toContain('speed-boost');

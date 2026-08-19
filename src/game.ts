@@ -52,6 +52,29 @@ const BUFF_INDICATOR_HEIGHT_RATIO = 0.4; // bar thickness, multiple of paddle he
 const BUFF_INDICATOR_GAP_RATIO = 1.6; // gap from paddle edge to first bar, multiple of paddle height
 const BUFF_INDICATOR_SPACING_RATIO = 1.2; // gap between stacked bars, multiple of paddle height
 
+// Win-screen celebration: a one-time particle burst plus a title scale/fade
+// entrance, both driven by `winCelebrationElapsed` (elapsed seconds since
+// `winner` last transitioned from null). Purely cosmetic -- render-only state
+// that never feeds back into score1/score2/winner.
+const WIN_CELEBRATION_DURATION_SECONDS = 1.8; // length of the particle burst
+const WIN_TITLE_ENTRANCE_DURATION_SECONDS = 0.5; // length of the title scale/fade-in
+const WIN_PARTICLE_COUNT = 28;
+const WIN_PARTICLE_COLORS = ['#ffd166', '#ff5b7f', '#06d6a0', '#a78bfa', '#8ecae6'];
+interface WinParticle {
+  angle: number;
+  distanceRatio: number; // fraction of min(width, height) traveled by the time the burst ends
+  sizeRatio: number; // particle radius, multiple of the ball radius
+  spinSpeed: number; // radians per second added to `angle` over the burst
+  color: string;
+}
+const WIN_PARTICLES: WinParticle[] = Array.from({ length: WIN_PARTICLE_COUNT }, (_, i) => ({
+  angle: hash01(i * 4.7 + 11) * Math.PI * 2,
+  distanceRatio: 0.18 + hash01(i * 6.1 + 12) * 0.22,
+  sizeRatio: 0.5 + hash01(i * 3.3 + 13) * 0.8,
+  spinSpeed: 2 + hash01(i * 8.3 + 14) * 4,
+  color: WIN_PARTICLE_COLORS[i % WIN_PARTICLE_COLORS.length],
+}));
+
 // Pointermove events fire often enough during a real drag that this cap is
 // imperceptible in normal play; it only becomes visible (and boostable) when
 // a power-up scales it up.
@@ -296,6 +319,7 @@ export class Game {
   extraBalls: ExtraBall[] = [];
   impacts: Impact[] = []; // active collision flashes/particle bursts, decayed in update()
   backdropTime = 0; // seconds elapsed, drives the starfield twinkle and planet orbits
+  winCelebrationElapsed = 0; // seconds since `winner` last became non-null, drives the win-screen celebration
   private hapticEvents: HapticEventKind[] = []; // queued since the last consumeHapticEvents() call
 
   private initialized = false;
@@ -346,8 +370,10 @@ export class Game {
     }
     if (this.score1 >= WINNING_SCORE) {
       this.winner = 1;
+      this.winCelebrationElapsed = 0;
     } else if (this.score2 >= WINNING_SCORE) {
       this.winner = 2;
+      this.winCelebrationElapsed = 0;
     }
   }
 
@@ -387,6 +413,7 @@ export class Game {
     this.extraBalls = [];
     this.impacts = [];
     this.hapticEvents = [];
+    this.winCelebrationElapsed = 0;
     this.serve(width, height);
   }
 
@@ -690,6 +717,7 @@ export class Game {
     }
 
     if (this.winner !== null) {
+      this.winCelebrationElapsed += dt;
       return;
     }
 
@@ -974,6 +1002,39 @@ export class Game {
     }
   }
 
+  // Draws the one-time win-screen particle burst: each WIN_PARTICLES entry
+  // radiates outward from the canvas center and fades as `elapsed` (seconds
+  // since `winner` became non-null) approaches WIN_CELEBRATION_DURATION_SECONDS,
+  // following the same age-driven fade/expand approach as renderImpacts.
+  // Purely visual -- reads winCelebrationElapsed without touching win state.
+  private renderWinCelebration(ctx: CanvasRenderingContext2D, width: number, height: number, elapsed: number): void {
+    const t = clamp(elapsed / WIN_CELEBRATION_DURATION_SECONDS, 0, 1);
+    if (t >= 1) {
+      return;
+    }
+    const eased = 1 - (1 - t) * (1 - t);
+    const fade = 1 - t;
+    const centerX = width / 2;
+    const centerY = height / 2;
+    const minSide = Math.min(width, height);
+    const baseRadius = height * BALL_RADIUS_RATIO;
+
+    ctx.save();
+    for (const particle of WIN_PARTICLES) {
+      const distance = eased * particle.distanceRatio * minSide;
+      const angle = particle.angle + elapsed * particle.spinSpeed;
+      const px = centerX + Math.cos(angle) * distance;
+      const py = centerY + Math.sin(angle) * distance;
+      const radius = baseRadius * particle.sizeRatio * fade;
+      ctx.globalAlpha = fade;
+      ctx.fillStyle = particle.color;
+      ctx.beginPath();
+      ctx.arc(px, py, radius, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
   // Draws the pre-serve countdown ring, centered on the ball's serve
   // position. Shrinks and brightens as `serveDelayRemaining` counts down to
   // zero; purely visual, reads existing state without touching serve timing.
@@ -1049,14 +1110,33 @@ export class Game {
     if (this.winner !== null) {
       ctx.fillStyle = 'rgba(10, 17, 40, 0.85)';
       ctx.fillRect(0, 0, width, height);
+
+      this.renderWinCelebration(ctx, width, height, this.winCelebrationElapsed);
+
+      // Title scales/fades in over WIN_TITLE_ENTRANCE_DURATION_SECONDS, then
+      // settles at scale=1/alpha=1 -- the same static look as before this
+      // animation existed.
+      const entranceT = clamp(this.winCelebrationElapsed / WIN_TITLE_ENTRANCE_DURATION_SECONDS, 0, 1);
+      const entranceEased = 1 - (1 - entranceT) * (1 - entranceT) * (1 - entranceT);
       ctx.save();
       ctx.fillStyle = '#e8ecf5';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.shadowColor = 'rgba(120, 170, 255, 0.85)';
       ctx.shadowBlur = height * 0.02;
+      ctx.globalAlpha = entranceEased;
+      ctx.translate(width / 2, height / 2 - height * 0.04);
+      ctx.scale(0.6 + 0.4 * entranceEased, 0.6 + 0.4 * entranceEased);
       ctx.font = `${Math.round(height * 0.045)}px sans-serif`;
-      ctx.fillText(`Player ${this.winner} wins`, width / 2, height / 2 - height * 0.04);
+      ctx.fillText(`Player ${this.winner} wins`, 0, 0);
+      ctx.restore();
+
+      ctx.save();
+      ctx.fillStyle = '#e8ecf5';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.shadowColor = 'rgba(120, 170, 255, 0.85)';
+      ctx.shadowBlur = height * 0.02;
       ctx.font = `${Math.round(height * 0.025)}px sans-serif`;
       ctx.fillText('Tap to play again', width / 2, height / 2 + height * 0.04);
       ctx.restore();
