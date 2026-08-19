@@ -421,6 +421,26 @@ describe('Game power-ups', () => {
     expect(game.ballVY).toBeCloseTo(-200 * FAST_BALL_MULTIPLIER);
   });
 
+  it('keeps the Fast Ball speed boost through a paddle bounce', () => {
+    const game = new Game();
+    game.update(0, 400, 800); // initialize
+    game.ballVX = 100;
+    game.ballVY = -200;
+    game.activePowerUp = { id: 1, kind: 'fast-ball', x: game.ballX, y: game.ballY };
+    game.update(0, 400, 800); // pick up the power-up
+    const boostedSpeed = Math.hypot(game.ballVX, game.ballVY);
+
+    game.paddle1X = game.ballX;
+    game.ballY = 60; // just above the top paddle band (margin = 0.06 * 800 = 48)
+    game.ballVX = 0;
+    game.ballVY = -boostedSpeed;
+
+    game.update(0.05, 400, 800); // bounce off player 1's paddle
+
+    expect(game.ballVY).toBeGreaterThan(0); // rebounds downward
+    expect(Math.hypot(game.ballVX, game.ballVY)).toBeCloseTo(boostedSpeed);
+  });
+
   it('ignores a power-up the ball has not reached yet', () => {
     const game = new Game();
     game.update(0, 400, 800);
