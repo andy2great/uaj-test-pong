@@ -34,6 +34,88 @@ export const GIANT_PADDLE_MULTIPLIER = 1.8;
 export const GIANT_PADDLE_DURATION_SECONDS = 5;
 export const MULTI_BALL_DURATION_SECONDS = 8;
 
+// Deterministic pseudo-random hash (no Math.random) so the starfield layout
+// is stable across renders instead of reshuffling every frame.
+function hash01(seed: number): number {
+  const x = Math.sin(seed * 12.9898) * 43758.5453;
+  return x - Math.floor(x);
+}
+
+const STAR_COUNT = 50;
+interface Star {
+  xRatio: number;
+  yRatio: number;
+  radiusPx: number;
+  twinkleSpeed: number;
+  twinklePhase: number;
+}
+const STARS: Star[] = Array.from({ length: STAR_COUNT }, (_, i) => ({
+  xRatio: hash01(i * 3.1 + 1),
+  yRatio: hash01(i * 7.7 + 2),
+  radiusPx: 0.6 + hash01(i * 5.3 + 3) * 1.2,
+  twinkleSpeed: 0.5 + hash01(i * 9.1 + 4) * 1.5,
+  twinklePhase: hash01(i * 2.3 + 5) * Math.PI * 2,
+}));
+
+// Orbiting planets drift behind the play field, evoking a slow solar-system
+// backdrop. Orbit center is fixed as a fraction of canvas size so it holds up
+// across the portrait aspect ratios the game supports.
+interface PlanetConfig {
+  colorNear: string;
+  colorFar: string;
+  radiusRatio: number; // planet radius, fraction of canvas height
+  orbitRadiusRatio: number; // orbit radius, fraction of min(width, height)
+  angularSpeed: number; // radians per second
+  phase: number; // initial angle offset
+}
+const ORBIT_CENTER_X_RATIO = 0.5;
+const ORBIT_CENTER_Y_RATIO = 0.38;
+const PLANETS: PlanetConfig[] = [
+  {
+    colorNear: '#f4a261',
+    colorFar: '#9c4f21',
+    radiusRatio: 0.05,
+    orbitRadiusRatio: 0.55,
+    angularSpeed: 0.12,
+    phase: 0,
+  },
+  {
+    colorNear: '#8ecae6',
+    colorFar: '#2a6f97',
+    radiusRatio: 0.032,
+    orbitRadiusRatio: 0.32,
+    angularSpeed: -0.2,
+    phase: Math.PI * 0.6,
+  },
+  {
+    colorNear: '#c9a0f5',
+    colorFar: '#5e3b8f',
+    radiusRatio: 0.022,
+    orbitRadiusRatio: 0.75,
+    angularSpeed: 0.07,
+    phase: Math.PI * 1.3,
+  },
+];
+
+// Pure so it can be unit tested directly: position of a body orbiting
+// (centerX, centerY) at the given radius/speed/phase at time `time`. The
+// vertical axis is flattened slightly to read as a gentle drift rather than a
+// perfect circle.
+export function orbitPosition(
+  centerX: number,
+  centerY: number,
+  orbitRadius: number,
+  angularSpeed: number,
+  phase: number,
+  time: number,
+): { x: number; y: number } {
+  const angle = phase + angularSpeed * time;
+  return {
+    x: centerX + Math.cos(angle) * orbitRadius,
+    y: centerY + Math.sin(angle) * orbitRadius * 0.55,
+  };
+}
+
 type PaddleId = 1 | 2;
 
 interface Ball {
@@ -165,6 +247,7 @@ export class Game {
   giantPaddleRemaining1 = 0;
   giantPaddleRemaining2 = 0;
   extraBalls: ExtraBall[] = [];
+  backdropTime = 0; // seconds elapsed, drives the starfield twinkle and planet orbits
 
   private initialized = false;
   private serveDelayRemaining = 0;
@@ -497,6 +580,7 @@ export class Game {
     this.ensureInitialized(width, height);
     this.lastHeight = height;
     this.lastWidth = width;
+    this.backdropTime += dt;
 
     if (this.speedBoostRemaining1 > 0) {
       this.speedBoostRemaining1 = Math.max(0, this.speedBoostRemaining1 - dt);
@@ -585,12 +669,50 @@ export class Game {
     }
   }
 
+  // Starfield + orbiting planets, drawn behind everything else. Purely
+  // decorative: reads `backdropTime` (advanced by `update`) but never
+  // touches ball/paddle state.
+  private renderBackdrop(ctx: CanvasRenderingContext2D, width: number, height: number): void {
+    ctx.fillStyle = '#f4f7ff';
+    for (const star of STARS) {
+      const twinkle = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(this.backdropTime * star.twinkleSpeed + star.twinklePhase));
+      ctx.globalAlpha = twinkle;
+      ctx.beginPath();
+      ctx.arc(star.xRatio * width, star.yRatio * height, star.radiusPx, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.globalAlpha = 1;
+
+    const centerX = width * ORBIT_CENTER_X_RATIO;
+    const centerY = height * ORBIT_CENTER_Y_RATIO;
+    const minSide = Math.min(width, height);
+    for (const planet of PLANETS) {
+      const { x, y } = orbitPosition(
+        centerX,
+        centerY,
+        planet.orbitRadiusRatio * minSide,
+        planet.angularSpeed,
+        planet.phase,
+        this.backdropTime,
+      );
+      const radius = planet.radiusRatio * height;
+      const gradient = ctx.createRadialGradient(x - radius * 0.3, y - radius * 0.3, radius * 0.1, x, y, radius);
+      gradient.addColorStop(0, planet.colorNear);
+      gradient.addColorStop(1, planet.colorFar);
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.arc(x, y, radius, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
   render(ctx: CanvasRenderingContext2D, width: number, height: number): void {
     this.ensureInitialized(width, height);
 
     ctx.clearRect(0, 0, width, height);
     ctx.fillStyle = '#0a1128';
     ctx.fillRect(0, 0, width, height);
+    this.renderBackdrop(ctx, width, height);
 
     const paddle1HalfWidth = this.paddleWidth(1, width) / 2;
     const paddle2HalfWidth = this.paddleWidth(2, width) / 2;
