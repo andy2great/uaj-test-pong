@@ -172,9 +172,19 @@ const STARS: Star[] = Array.from({ length: STAR_COUNT }, (_, i) => ({
 // only rebuilt when the canvas size changes rather than allocated fresh every
 // frame -- 50 stars x 60fps worth of `createRadialGradient` calls would be
 // wasteful for a purely decorative backdrop.
-let starGlowCache: { width: number; height: number; gradients: CanvasGradient[] } | null = null;
-function getStarGlowGradients(ctx: CanvasRenderingContext2D, width: number, height: number): CanvasGradient[] {
-  if (starGlowCache && starGlowCache.width === width && starGlowCache.height === height) {
+let starGlowCache: { width: number; height: number; glowRgb: string; gradients: CanvasGradient[] } | null = null;
+function getStarGlowGradients(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  glowRgb: string,
+): CanvasGradient[] {
+  if (
+    starGlowCache &&
+    starGlowCache.width === width &&
+    starGlowCache.height === height &&
+    starGlowCache.glowRgb === glowRgb
+  ) {
     return starGlowCache.gradients;
   }
   const gradients = STARS.map((star) => {
@@ -182,11 +192,11 @@ function getStarGlowGradients(ctx: CanvasRenderingContext2D, width: number, heig
     const y = star.yRatio * height;
     const glowRadius = star.radiusPx * STAR_GLOW_RADIUS_RATIO;
     const gradient = ctx.createRadialGradient(x, y, 0, x, y, glowRadius);
-    gradient.addColorStop(0, 'rgba(244, 247, 255, 0.85)');
-    gradient.addColorStop(1, 'rgba(244, 247, 255, 0)');
+    gradient.addColorStop(0, `rgba(${glowRgb}, 0.85)`);
+    gradient.addColorStop(1, `rgba(${glowRgb}, 0)`);
     return gradient;
   });
-  starGlowCache = { width, height, gradients };
+  starGlowCache = { width, height, glowRgb, gradients };
   return gradients;
 }
 
@@ -200,9 +210,6 @@ interface PlanetRing {
   tilt: number; // ring rotation, radians
 }
 interface PlanetConfig {
-  colorNear: string;
-  colorFar: string;
-  bandColor: string; // subtle surface-band overlay tint
   radiusRatio: number; // planet radius, fraction of canvas height
   orbitRadiusRatio: number; // orbit radius, fraction of min(width, height)
   angularSpeed: number; // radians per second
@@ -213,9 +220,6 @@ const ORBIT_CENTER_X_RATIO = 0.5;
 const ORBIT_CENTER_Y_RATIO = 0.38;
 const PLANETS: PlanetConfig[] = [
   {
-    colorNear: '#f4a261',
-    colorFar: '#9c4f21',
-    bandColor: '#fff3e0',
     radiusRatio: 0.05,
     orbitRadiusRatio: 0.55,
     angularSpeed: 0.12,
@@ -223,24 +227,81 @@ const PLANETS: PlanetConfig[] = [
     ring: { color: '#e9c893', radiusXRatio: 1.9, radiusYRatio: 0.55, tilt: -0.35 },
   },
   {
-    colorNear: '#8ecae6',
-    colorFar: '#2a6f97',
-    bandColor: '#eaf7ff',
     radiusRatio: 0.032,
     orbitRadiusRatio: 0.32,
     angularSpeed: -0.2,
     phase: Math.PI * 0.6,
   },
   {
-    colorNear: '#c9a0f5',
-    colorFar: '#5e3b8f',
-    bandColor: '#f4e9ff',
     radiusRatio: 0.022,
     orbitRadiusRatio: 0.75,
     angularSpeed: 0.07,
     phase: Math.PI * 1.3,
   },
 ];
+
+// Map-select (#57): the player picks Earth or Mars before the first serve,
+// which swaps the backdrop's background/star/planet colors below. Gameplay
+// (ball/paddle/power-ups) never reads `selectedMap` or these palettes.
+export type MapId = 'earth' | 'mars';
+
+interface PlanetPalette {
+  colorNear: string;
+  colorFar: string;
+  bandColor: string; // subtle surface-band overlay tint
+}
+
+interface MapTheme {
+  id: MapId;
+  label: string;
+  backgroundColor: string;
+  starColor: string;
+  starGlowRgb: string; // "r, g, b" components, used at alpha 0.85/0 in the glow gradient
+  planetPalettes: PlanetPalette[]; // same order/length as PLANETS
+}
+
+const DEFAULT_BACKGROUND_COLOR = '#0a1128';
+const DEFAULT_STAR_COLOR = '#f4f7ff';
+const DEFAULT_STAR_GLOW_RGB = '244, 247, 255';
+const DEFAULT_PLANET_PALETTES: PlanetPalette[] = [
+  { colorNear: '#f4a261', colorFar: '#9c4f21', bandColor: '#fff3e0' },
+  { colorNear: '#8ecae6', colorFar: '#2a6f97', bandColor: '#eaf7ff' },
+  { colorNear: '#c9a0f5', colorFar: '#5e3b8f', bandColor: '#f4e9ff' },
+];
+
+// Shown before a map is chosen (title screen, map-select screen), so it
+// stays visually distinct from the two selectable themes below.
+export const MAP_THEMES: Record<MapId, MapTheme> = {
+  earth: {
+    id: 'earth',
+    label: 'Earth',
+    backgroundColor: '#031a1f',
+    starColor: '#eafff5',
+    starGlowRgb: '160, 230, 210',
+    planetPalettes: [
+      { colorNear: '#7ec8e3', colorFar: '#1b4d6b', bandColor: '#eaffea' },
+      { colorNear: '#8fd694', colorFar: '#2f6e3a', bandColor: '#eaffea' },
+      { colorNear: '#5e8fd6', colorFar: '#233c6b', bandColor: '#e7f0ff' },
+    ],
+  },
+  mars: {
+    id: 'mars',
+    label: 'Mars',
+    backgroundColor: '#2a0e08',
+    starColor: '#ffe9db',
+    starGlowRgb: '255, 176, 130',
+    planetPalettes: [
+      { colorNear: '#e07a4f', colorFar: '#7a2e12', bandColor: '#ffe3cc' },
+      { colorNear: '#c15c3c', colorFar: '#5c1f0d', bandColor: '#ffd8bd' },
+      { colorNear: '#8f4a33', colorFar: '#3d1a0d', bandColor: '#ffcaa8' },
+    ],
+  },
+};
+
+// Map-select buttons: two stacked, thumb-reachable rects centered on screen.
+const MAP_BUTTON_WIDTH_RATIO = 0.6; // fraction of canvas width
+const MAP_BUTTON_HEIGHT_RATIO = 0.1; // fraction of canvas height
+const MAP_BUTTON_GAP_RATIO = 0.04; // fraction of canvas height, between buttons
 
 // Pure so it can be unit tested directly: position of a body orbiting
 // (centerX, centerY) at the given radius/speed/phase at time `time`. The
@@ -397,6 +458,8 @@ export class Game {
   score2 = 0; // player 2 (bottom) score
   winner: PaddleId | null = null;
   titleScreenActive = true; // shown once on first load, dismissed by the first tap
+  mapSelectActive = false; // shown right after the title screen, dismissed by picking a map
+  selectedMap: MapId | null = null; // null until a map is picked; persists across restartMatch
 
   activePowerUp: PowerUp | null = null;
   lastPaddleTouch: PaddleId | null = null; // paddle that most recently hit the ball this rally
@@ -533,13 +596,47 @@ export class Game {
     return events;
   }
 
+  // Bounding box of the index-th map-select button (0 = first theme, in
+  // `MAP_THEMES` insertion order), shared by hit-testing and rendering so
+  // they can never drift apart.
+  private mapButtonRect(index: number, width: number, height: number): { x: number; y: number; w: number; h: number } {
+    const themeCount = Object.keys(MAP_THEMES).length;
+    const w = width * MAP_BUTTON_WIDTH_RATIO;
+    const h = height * MAP_BUTTON_HEIGHT_RATIO;
+    const gap = height * MAP_BUTTON_GAP_RATIO;
+    const totalHeight = h * themeCount + gap * (themeCount - 1);
+    const x = (width - w) / 2;
+    const y = height / 2 - totalHeight / 2 + index * (h + gap);
+    return { x, y, w, h };
+  }
+
+  // Returns the map tapped at (x, y) during the map-select screen, or null
+  // when the tap missed both buttons.
+  private mapAt(x: number, y: number, width: number, height: number): MapId | null {
+    const themes = Object.values(MAP_THEMES);
+    for (let i = 0; i < themes.length; i += 1) {
+      const rect = this.mapButtonRect(i, width, height);
+      if (x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h) {
+        return themes[i].id;
+      }
+    }
+    return null;
+  }
+
   onPointerDown(pointerId: number, x: number, y: number, width: number, height: number): void {
     this.ensureInitialized(width, height);
     if (this.titleScreenActive) {
       this.titleScreenActive = false;
-      this.serveDelayRemaining = SERVE_DELAY_SECONDS;
+      this.mapSelectActive = true;
     }
-    if (this.winner !== null) {
+    if (this.mapSelectActive) {
+      const chosen = this.mapAt(x, y, width, height);
+      if (chosen !== null) {
+        this.selectedMap = chosen;
+        this.mapSelectActive = false;
+        this.serveDelayRemaining = SERVE_DELAY_SECONDS;
+      }
+    } else if (this.winner !== null) {
       this.restartMatch(width, height);
       return;
     }
@@ -796,7 +893,7 @@ export class Game {
     this.lastWidth = width;
     this.backdropTime += dt;
 
-    if (this.titleScreenActive) {
+    if (this.titleScreenActive || this.mapSelectActive) {
       return;
     }
 
@@ -903,7 +1000,10 @@ export class Game {
   // decorative: reads `backdropTime` (advanced by `update`) but never
   // touches ball/paddle state.
   private renderBackdrop(ctx: CanvasRenderingContext2D, width: number, height: number): void {
-    const glowGradients = getStarGlowGradients(ctx, width, height);
+    const theme = this.selectedMap ? MAP_THEMES[this.selectedMap] : null;
+    const starColor = theme?.starColor ?? DEFAULT_STAR_COLOR;
+    const planetPalettes = theme?.planetPalettes ?? DEFAULT_PLANET_PALETTES;
+    const glowGradients = getStarGlowGradients(ctx, width, height, theme?.starGlowRgb ?? DEFAULT_STAR_GLOW_RGB);
     STARS.forEach((star, i) => {
       const twinkle = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(this.backdropTime * star.twinkleSpeed + star.twinklePhase));
       const x = star.xRatio * width;
@@ -917,7 +1017,7 @@ export class Game {
       ctx.arc(x, y, star.radiusPx * STAR_GLOW_RADIUS_RATIO * (0.5 + 0.5 * twinkle), 0, Math.PI * 2);
       ctx.fill();
 
-      ctx.fillStyle = '#f4f7ff';
+      ctx.fillStyle = starColor;
       ctx.beginPath();
       ctx.arc(x, y, star.radiusPx, 0, Math.PI * 2);
       ctx.fill();
@@ -928,6 +1028,7 @@ export class Game {
     const centerY = height * ORBIT_CENTER_Y_RATIO;
     const minSide = Math.min(width, height);
     PLANETS.forEach((planet, planetIndex) => {
+      const palette = planetPalettes[planetIndex];
       const { x, y } = orbitPosition(
         centerX,
         centerY,
@@ -943,8 +1044,8 @@ export class Game {
       }
 
       const gradient = ctx.createRadialGradient(x - radius * 0.3, y - radius * 0.3, radius * 0.1, x, y, radius);
-      gradient.addColorStop(0, planet.colorNear);
-      gradient.addColorStop(1, planet.colorFar);
+      gradient.addColorStop(0, palette.colorNear);
+      gradient.addColorStop(1, palette.colorFar);
       ctx.fillStyle = gradient;
       ctx.beginPath();
       ctx.arc(x, y, radius, 0, Math.PI * 2);
@@ -959,7 +1060,7 @@ export class Game {
       ctx.clip();
 
       const bandCount = 4;
-      ctx.fillStyle = planet.bandColor;
+      ctx.fillStyle = palette.bandColor;
       for (let band = 0; band < bandCount; band++) {
         const bandSeed = planetIndex * 19.7 + band * 7.3;
         const bandY = y - radius + hash01(bandSeed + 61) * radius * 2;
@@ -1323,7 +1424,7 @@ export class Game {
     ctx.save();
     ctx.translate((Math.random() * 2 - 1) * shakeAmount, (Math.random() * 2 - 1) * shakeAmount);
 
-    ctx.fillStyle = '#0a1128';
+    ctx.fillStyle = this.selectedMap ? MAP_THEMES[this.selectedMap].backgroundColor : DEFAULT_BACKGROUND_COLOR;
     ctx.fillRect(-shakeMargin, -shakeMargin, width + shakeMargin * 2, height + shakeMargin * 2);
     this.renderBackdrop(ctx, width, height);
     this.renderHud(ctx, width, height);
@@ -1416,6 +1517,43 @@ export class Game {
       applyTextStyle(ctx, 'secondary', height * 0.025);
       ctx.fillText('Tap to start', width / 2, height / 2 + height * 0.04);
       ctx.restore();
+    }
+
+    if (this.mapSelectActive) {
+      ctx.fillStyle = 'rgba(10, 17, 40, 0.55)';
+      ctx.fillRect(0, 0, width, height);
+
+      const themes = Object.values(MAP_THEMES);
+      const firstRect = this.mapButtonRect(0, width, height);
+
+      ctx.save();
+      ctx.fillStyle = '#e8ecf5';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.shadowColor = 'rgba(120, 170, 255, 0.85)';
+      ctx.shadowBlur = height * 0.02;
+      applyTextStyle(ctx, 'secondary', height * 0.03);
+      ctx.fillText('Choose your map', width / 2, firstRect.y - height * 0.06);
+      ctx.restore();
+
+      themes.forEach((theme, i) => {
+        const rect = this.mapButtonRect(i, width, height);
+        ctx.save();
+        ctx.beginPath();
+        ctx.roundRect(rect.x, rect.y, rect.w, rect.h, rect.h * 0.25);
+        ctx.fillStyle = theme.backgroundColor;
+        ctx.fill();
+        ctx.strokeStyle = 'rgba(232, 236, 245, 0.35)';
+        ctx.lineWidth = Math.max(1, rect.h * 0.04);
+        ctx.stroke();
+
+        ctx.fillStyle = '#e8ecf5';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        applyTextStyle(ctx, 'primary', rect.h * 0.4);
+        ctx.fillText(theme.label, rect.x + rect.w / 2, rect.y + rect.h / 2);
+        ctx.restore();
+      });
     }
 
     if (this.winner !== null) {
