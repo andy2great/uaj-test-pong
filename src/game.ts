@@ -20,7 +20,41 @@ const MAX_BOUNCE_ANGLE = Math.PI / 3; // 60 degrees from vertical at the paddle 
 const WINNING_SCORE = 11; // first player to reach this score wins the match
 const SERVE_DELAY_SECONDS = 1; // pause after a point before the ball re-serves
 
+// Pointermove events fire often enough during a real drag that this cap is
+// imperceptible in normal play; it only becomes visible (and boostable) when
+// a power-up scales it up.
+export const PADDLE_MOVE_STEP_RATIO = 0.3; // max fraction of canvas width a paddle may travel per drag event
+export const POWER_UP_SPAWN_INTERVAL_SECONDS = 6; // gap between power-up spawns during an active rally
+const POWER_UP_RADIUS_RATIO = 0.03; // fraction of canvas height
+export const SPEED_BOOST_MULTIPLIER = 1.6;
+export const SPEED_BOOST_DURATION_SECONDS = 5;
+export const FAST_BALL_MULTIPLIER = 1.35;
+
 type PaddleId = 1 | 2;
+
+export type PowerUpKind = 'speed-boost' | 'fast-ball';
+
+export interface PowerUp {
+  id: number;
+  kind: PowerUpKind;
+  x: number;
+  y: number;
+}
+
+interface PowerUpDefinition {
+  kind: PowerUpKind;
+  activate: (game: Game) => void;
+}
+
+// Registry of power-up effects: add a new { kind, activate } entry to
+// introduce another power-up. Spawn/collision/expiry logic below stays
+// generic and never branches on `kind` directly.
+const POWER_UP_DEFINITIONS: PowerUpDefinition[] = [
+  { kind: 'speed-boost', activate: (game) => game.activateSpeedBoost() },
+  { kind: 'fast-ball', activate: (game) => game.activateFastBall() },
+];
+
+export const POWER_UP_KINDS: readonly PowerUpKind[] = POWER_UP_DEFINITIONS.map((entry) => entry.kind);
 
 // Pure so it can be unit tested directly: given where the ball hit a paddle
 // (relative to the paddle's center and width), returns the rebound velocity.
@@ -53,8 +87,17 @@ export class Game {
   score2 = 0; // player 2 (bottom) score
   winner: PaddleId | null = null;
 
+  activePowerUp: PowerUp | null = null;
+  lastPaddleTouch: PaddleId | null = null; // paddle that most recently hit the ball this rally
+  paddleSpeedMultiplier1 = 1;
+  paddleSpeedMultiplier2 = 1;
+  speedBoostRemaining = 0;
+
   private initialized = false;
   private serveDelayRemaining = 0;
+  private speedBoostPaddle: PaddleId | null = null;
+  private powerUpSpawnTimer = POWER_UP_SPAWN_INTERVAL_SECONDS;
+  private nextPowerUpId = 1;
   private readonly pointerPaddle = new Map<number, PaddleId>();
 
   private ensureInitialized(width: number, height: number): void {
@@ -98,6 +141,8 @@ export class Game {
     this.ballY = height / 2;
     this.ballVX = 0;
     this.ballVY = 0;
+    this.activePowerUp = null;
+    this.powerUpSpawnTimer = POWER_UP_SPAWN_INTERVAL_SECONDS;
     if (this.winner === null) {
       this.serveDelayRemaining = SERVE_DELAY_SECONDS;
     }
@@ -108,6 +153,13 @@ export class Game {
     this.score2 = 0;
     this.winner = null;
     this.serveDelayRemaining = 0;
+    this.activePowerUp = null;
+    this.powerUpSpawnTimer = POWER_UP_SPAWN_INTERVAL_SECONDS;
+    this.lastPaddleTouch = null;
+    this.paddleSpeedMultiplier1 = 1;
+    this.paddleSpeedMultiplier2 = 1;
+    this.speedBoostRemaining = 0;
+    this.speedBoostPaddle = null;
     this.serve(width, height);
   }
 
@@ -127,7 +179,7 @@ export class Game {
     if (paddle === undefined) {
       return;
     }
-    this.movePaddle(paddle, x, width);
+    this.dragPaddle(paddle, x, width);
   }
 
   onPointerUp(pointerId: number): void {
@@ -144,8 +196,83 @@ export class Game {
     }
   }
 
+  // Like movePaddle, but rate-limited to PADDLE_MOVE_STEP_RATIO per call so a
+  // Speed Boost (which scales the limit) has a visible effect.
+  private dragPaddle(paddle: PaddleId, x: number, width: number): void {
+    const halfWidth = (width * PADDLE_WIDTH_RATIO) / 2;
+    const target = clamp(x, halfWidth, width - halfWidth);
+    const current = paddle === 1 ? this.paddle1X : this.paddle2X;
+    const multiplier = paddle === 1 ? this.paddleSpeedMultiplier1 : this.paddleSpeedMultiplier2;
+    const maxStep = width * PADDLE_MOVE_STEP_RATIO * multiplier;
+    const next = current + clamp(target - current, -maxStep, maxStep);
+    if (paddle === 1) {
+      this.paddle1X = next;
+    } else {
+      this.paddle2X = next;
+    }
+  }
+
+  activateSpeedBoost(): void {
+    const paddle = this.lastPaddleTouch;
+    if (paddle === null) {
+      return;
+    }
+    if (paddle === 1) {
+      this.paddleSpeedMultiplier1 = SPEED_BOOST_MULTIPLIER;
+    } else {
+      this.paddleSpeedMultiplier2 = SPEED_BOOST_MULTIPLIER;
+    }
+    this.speedBoostPaddle = paddle;
+    this.speedBoostRemaining = SPEED_BOOST_DURATION_SECONDS;
+  }
+
+  activateFastBall(): void {
+    this.ballVX *= FAST_BALL_MULTIPLIER;
+    this.ballVY *= FAST_BALL_MULTIPLIER;
+  }
+
+  private spawnPowerUp(width: number, height: number): void {
+    const definition = POWER_UP_DEFINITIONS[Math.floor(Math.random() * POWER_UP_DEFINITIONS.length)];
+    const marginX = width * 0.15;
+    const marginY = height * (PADDLE_MARGIN_RATIO + 0.1);
+    this.activePowerUp = {
+      id: this.nextPowerUpId++,
+      kind: definition.kind,
+      x: marginX + Math.random() * (width - marginX * 2),
+      y: marginY + Math.random() * (height - marginY * 2),
+    };
+  }
+
+  private handlePowerUpCollision(height: number): void {
+    const powerUp = this.activePowerUp;
+    if (powerUp === null) {
+      return;
+    }
+    const collisionRadius = height * BALL_RADIUS_RATIO + height * POWER_UP_RADIUS_RATIO;
+    const dx = this.ballX - powerUp.x;
+    const dy = this.ballY - powerUp.y;
+    if (dx * dx + dy * dy > collisionRadius * collisionRadius) {
+      return;
+    }
+    this.activePowerUp = null;
+    const definition = POWER_UP_DEFINITIONS.find((entry) => entry.kind === powerUp.kind);
+    definition?.activate(this);
+  }
+
   update(dt: number, width: number, height: number): void {
     this.ensureInitialized(width, height);
+
+    if (this.speedBoostRemaining > 0) {
+      this.speedBoostRemaining = Math.max(0, this.speedBoostRemaining - dt);
+      if (this.speedBoostRemaining === 0 && this.speedBoostPaddle !== null) {
+        if (this.speedBoostPaddle === 1) {
+          this.paddleSpeedMultiplier1 = 1;
+        } else {
+          this.paddleSpeedMultiplier2 = 1;
+        }
+        this.speedBoostPaddle = null;
+      }
+    }
 
     if (this.winner !== null) {
       return;
@@ -192,6 +319,7 @@ export class Game {
       const { vx, vy } = reflectOffPaddle(this.ballX, this.paddle1X, paddleWidth, speed, true);
       this.ballVX = vx;
       this.ballVY = vy;
+      this.lastPaddleTouch = 1;
     } else if (
       this.ballVY > 0 &&
       this.ballY + radius >= paddle2Y - paddleHeight / 2 &&
@@ -202,7 +330,15 @@ export class Game {
       const { vx, vy } = reflectOffPaddle(this.ballX, this.paddle2X, paddleWidth, speed, false);
       this.ballVX = vx;
       this.ballVY = vy;
+      this.lastPaddleTouch = 2;
     }
+
+    this.powerUpSpawnTimer -= dt;
+    if (this.activePowerUp === null && this.powerUpSpawnTimer <= 0) {
+      this.spawnPowerUp(width, height);
+      this.powerUpSpawnTimer = POWER_UP_SPAWN_INTERVAL_SECONDS;
+    }
+    this.handlePowerUpCollision(height);
 
     if (this.ballY + radius < 0) {
       // Ball exited past the top edge: bottom player (player 2) scores.
@@ -233,6 +369,19 @@ export class Game {
     ctx.arc(this.ballX, this.ballY, height * BALL_RADIUS_RATIO, 0, Math.PI * 2);
     ctx.fillStyle = '#5b8cff';
     ctx.fill();
+
+    if (this.activePowerUp !== null) {
+      const powerUpRadius = height * POWER_UP_RADIUS_RATIO;
+      ctx.beginPath();
+      ctx.arc(this.activePowerUp.x, this.activePowerUp.y, powerUpRadius, 0, Math.PI * 2);
+      ctx.fillStyle = this.activePowerUp.kind === 'speed-boost' ? '#ffd166' : '#ff5b7f';
+      ctx.fill();
+      ctx.fillStyle = '#0a1128';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.font = `${Math.round(powerUpRadius * 1.2)}px sans-serif`;
+      ctx.fillText(this.activePowerUp.kind === 'speed-boost' ? 'S' : 'F', this.activePowerUp.x, this.activePowerUp.y);
+    }
 
     ctx.fillStyle = '#e8ecf5';
     ctx.textAlign = 'center';
