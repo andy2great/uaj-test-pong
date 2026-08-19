@@ -1,9 +1,11 @@
 import { Game, HapticEventKind } from './game';
+import { playSound, resumeAudio } from './audio';
 
 // Short, distinct vibration patterns per event, in milliseconds. A single
 // number is one pulse; an array alternates vibrate/pause.
 const HAPTIC_PATTERNS: Record<HapticEventKind, number | number[]> = {
   'paddle-hit': 10,
+  'wall-bounce': 8,
   score: [20, 30, 20],
   'power-up': 15,
 };
@@ -30,6 +32,7 @@ window.addEventListener('resize', resize);
 resize();
 
 canvas.addEventListener('pointerdown', (event) => {
+  resumeAudio();
   canvas.setPointerCapture(event.pointerId);
   game.onPointerDown(event.pointerId, event.clientX, event.clientY, window.innerWidth, window.innerHeight);
 });
@@ -53,6 +56,7 @@ function frame(now: number): void {
   game.update(dt, window.innerWidth, window.innerHeight);
   for (const event of game.consumeHapticEvents()) {
     vibrate(event);
+    playSound(event);
   }
   game.render(ctx, window.innerWidth, window.innerHeight);
   requestAnimationFrame(frame);
