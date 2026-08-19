@@ -19,6 +19,7 @@ const BALL_SPEED_RATIO = 0.55; // canvas-heights per second
 const MAX_BOUNCE_ANGLE = Math.PI / 3; // 60 degrees from vertical at the paddle edges
 const WINNING_SCORE = 11; // first player to reach this score wins the match
 const SERVE_DELAY_SECONDS = 1; // pause after a point before the ball re-serves
+const MAX_WALL_BOUNCES_PER_FRAME = 8; // safety bound on the per-frame wall-bounce segment walk below
 
 // Pointermove events fire often enough during a real drag that this cap is
 // imperceptible in normal play; it only becomes visible (and boostable) when
@@ -400,71 +401,95 @@ export class Game {
   // primary ball and every Multi-Ball bonus ball so their physics never
   // diverge.
   private stepBallPhysics(ball: Ball, dt: number, width: number, height: number): PaddleId | null {
-    // Boosted (e.g. stacked Fast Ball) speeds can move the ball farther than
-    // the paddle's collision band in a single frame, so the far-side bound of
-    // each paddle check below is tested against the ball's pre-move position
-    // rather than its post-move one: that way a frame whose path crosses the
-    // whole band still registers a bounce even if the ball ends up past it.
-    const startY = ball.y;
-    const startX = ball.x;
-    ball.x += ball.vx * dt;
-    ball.y += ball.vy * dt;
-
     const radius = height * BALL_RADIUS_RATIO;
-
-    if (ball.x - radius <= 0) {
-      ball.x = radius;
-      ball.vx = Math.abs(ball.vx);
-    } else if (ball.x + radius >= width) {
-      ball.x = width - radius;
-      ball.vx = -Math.abs(ball.vx);
-    }
-
     const paddle1Width = this.paddleWidth(1, width);
     const paddle2Width = this.paddleWidth(2, width);
     const paddleHeight = height * PADDLE_HEIGHT_RATIO;
     const paddle1Y = height * PADDLE_MARGIN_RATIO;
     const paddle2Y = height * (1 - PADDLE_MARGIN_RATIO);
-    const speed = Math.hypot(ball.vx, ball.vy);
 
-    if (
-      ball.vy < 0 &&
-      pathCrossesBand(
-        startX,
-        ball.x,
-        this.paddle1X - paddle1Width / 2 - radius,
-        this.paddle1X + paddle1Width / 2 + radius,
-        startY,
-        ball.y,
-        paddle1Y - paddleHeight / 2 - radius,
-        paddle1Y + paddleHeight / 2 + radius,
-      )
-    ) {
-      ball.y = paddle1Y + paddleHeight / 2 + radius;
-      const { vx, vy } = reflectOffPaddle(ball.x, this.paddle1X, paddle1Width, speed, true);
-      ball.vx = vx;
-      ball.vy = vy;
-      return 1;
+    // Boosted (e.g. stacked Fast Ball) speeds can carry the ball across a
+    // side wall and back across the court within a single frame. Walk the
+    // frame as a sequence of straight-line segments split at each wall
+    // bounce, running the swept paddle check (pathCrossesBand) against every
+    // segment's true pre-move/post-move span -- not just the first,
+    // pre-bounce leg -- so a paddle sitting anywhere on the ball's real path
+    // is never skipped.
+    let segStartX = ball.x;
+    let segStartY = ball.y;
+    let remaining = dt;
+
+    for (let bounce = 0; bounce < MAX_WALL_BOUNCES_PER_FRAME; bounce += 1) {
+      const rawEndX = segStartX + ball.vx * remaining;
+      const rawEndY = segStartY + ball.vy * remaining;
+
+      let wallT: number | null = null;
+      if (ball.vx < 0 && rawEndX - radius < 0) {
+        wallT = (radius - segStartX) / (rawEndX - segStartX);
+      } else if (ball.vx > 0 && rawEndX + radius > width) {
+        wallT = (width - radius - segStartX) / (rawEndX - segStartX);
+      }
+
+      const segEndX = wallT === null ? rawEndX : segStartX + (rawEndX - segStartX) * wallT;
+      const segEndY = wallT === null ? rawEndY : segStartY + (rawEndY - segStartY) * wallT;
+      const speed = Math.hypot(ball.vx, ball.vy);
+
+      if (
+        ball.vy < 0 &&
+        pathCrossesBand(
+          segStartX,
+          segEndX,
+          this.paddle1X - paddle1Width / 2 - radius,
+          this.paddle1X + paddle1Width / 2 + radius,
+          segStartY,
+          segEndY,
+          paddle1Y - paddleHeight / 2 - radius,
+          paddle1Y + paddleHeight / 2 + radius,
+        )
+      ) {
+        ball.x = segEndX;
+        ball.y = paddle1Y + paddleHeight / 2 + radius;
+        const { vx, vy } = reflectOffPaddle(ball.x, this.paddle1X, paddle1Width, speed, true);
+        ball.vx = vx;
+        ball.vy = vy;
+        return 1;
+      }
+      if (
+        ball.vy > 0 &&
+        pathCrossesBand(
+          segStartX,
+          segEndX,
+          this.paddle2X - paddle2Width / 2 - radius,
+          this.paddle2X + paddle2Width / 2 + radius,
+          segStartY,
+          segEndY,
+          paddle2Y - paddleHeight / 2 - radius,
+          paddle2Y + paddleHeight / 2 + radius,
+        )
+      ) {
+        ball.x = segEndX;
+        ball.y = paddle2Y - paddleHeight / 2 - radius;
+        const { vx, vy } = reflectOffPaddle(ball.x, this.paddle2X, paddle2Width, speed, false);
+        ball.vx = vx;
+        ball.vy = vy;
+        return 2;
+      }
+
+      if (wallT === null) {
+        ball.x = segEndX;
+        ball.y = segEndY;
+        return null;
+      }
+
+      const hitLeftWall = ball.vx < 0;
+      segStartX = hitLeftWall ? radius : width - radius;
+      segStartY = segEndY;
+      ball.vx = -ball.vx;
+      remaining *= 1 - wallT;
     }
-    if (
-      ball.vy > 0 &&
-      pathCrossesBand(
-        startX,
-        ball.x,
-        this.paddle2X - paddle2Width / 2 - radius,
-        this.paddle2X + paddle2Width / 2 + radius,
-        startY,
-        ball.y,
-        paddle2Y - paddleHeight / 2 - radius,
-        paddle2Y + paddleHeight / 2 + radius,
-      )
-    ) {
-      ball.y = paddle2Y - paddleHeight / 2 - radius;
-      const { vx, vy } = reflectOffPaddle(ball.x, this.paddle2X, paddle2Width, speed, false);
-      ball.vx = vx;
-      ball.vy = vy;
-      return 2;
-    }
+
+    ball.x = segStartX;
+    ball.y = segStartY;
     return null;
   }
 

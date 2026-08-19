@@ -520,6 +520,32 @@ describe('Game power-ups', () => {
     expect(game.score2).toBe(0);
   });
 
+  it('still bounces off a paddle when a side-wall bounce and the paddle crossing both happen within the same frame (issue #23)', () => {
+    const game = new Game();
+    game.update(0, 800, 400); // initialize
+
+    // Reproduces issue #23: at extreme stacked-Fast-Ball speed the ball
+    // crosses the left wall early in the frame (t =~ 0.95ms in), then -- per
+    // true straight-line-with-reflection physics -- travels back across the
+    // court for the rest of the frame, crossing player 1's collision band
+    // (X =~ [581.6, 818.4]) on the way. The old single-Euler-step-then-clamp
+    // implementation collapsed the ball's X to the wall for the whole frame
+    // and never saw this second leg, letting the ball tunnel through a
+    // correctly-positioned paddle.
+    game.paddle1X = 700;
+    game.ballX = 50;
+    game.ballY = 380;
+    game.ballVX = -46000;
+    game.ballVY = -22000;
+    game.lastPaddleTouch = null;
+
+    game.update(1 / 60, 800, 400);
+
+    expect(game.lastPaddleTouch).toBe(1); // bounce registered off player 1's paddle
+    expect(game.ballVY).toBeGreaterThan(0); // rebounds downward instead of tunneling through
+    expect(game.score2).toBe(0); // player 2 must not be awarded an undeserved point
+  });
+
   it('ignores a power-up the ball has not reached yet', () => {
     const game = new Game();
     game.update(0, 400, 800);
