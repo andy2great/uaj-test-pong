@@ -152,6 +152,7 @@ function hash01(seed: number): number {
 }
 
 const STAR_COUNT = 50;
+const STAR_GLOW_RADIUS_RATIO = 4; // max glow radius, multiple of star radius
 interface Star {
   xRatio: number;
   yRatio: number;
@@ -166,6 +167,28 @@ const STARS: Star[] = Array.from({ length: STAR_COUNT }, (_, i) => ({
   twinkleSpeed: 0.5 + hash01(i * 9.1 + 4) * 1.5,
   twinklePhase: hash01(i * 2.3 + 5) * Math.PI * 2,
 }));
+
+// Glow gradients are anchored to absolute canvas pixel positions, so they're
+// only rebuilt when the canvas size changes rather than allocated fresh every
+// frame -- 50 stars x 60fps worth of `createRadialGradient` calls would be
+// wasteful for a purely decorative backdrop.
+let starGlowCache: { width: number; height: number; gradients: CanvasGradient[] } | null = null;
+function getStarGlowGradients(ctx: CanvasRenderingContext2D, width: number, height: number): CanvasGradient[] {
+  if (starGlowCache && starGlowCache.width === width && starGlowCache.height === height) {
+    return starGlowCache.gradients;
+  }
+  const gradients = STARS.map((star) => {
+    const x = star.xRatio * width;
+    const y = star.yRatio * height;
+    const glowRadius = star.radiusPx * STAR_GLOW_RADIUS_RATIO;
+    const gradient = ctx.createRadialGradient(x, y, 0, x, y, glowRadius);
+    gradient.addColorStop(0, 'rgba(244, 247, 255, 0.85)');
+    gradient.addColorStop(1, 'rgba(244, 247, 255, 0)');
+    return gradient;
+  });
+  starGlowCache = { width, height, gradients };
+  return gradients;
+}
 
 // Orbiting planets drift behind the play field, evoking a slow solar-system
 // backdrop. Orbit center is fixed as a fraction of canvas size so it holds up
@@ -880,14 +903,25 @@ export class Game {
   // decorative: reads `backdropTime` (advanced by `update`) but never
   // touches ball/paddle state.
   private renderBackdrop(ctx: CanvasRenderingContext2D, width: number, height: number): void {
-    ctx.fillStyle = '#f4f7ff';
-    for (const star of STARS) {
+    const glowGradients = getStarGlowGradients(ctx, width, height);
+    STARS.forEach((star, i) => {
       const twinkle = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(this.backdropTime * star.twinkleSpeed + star.twinklePhase));
+      const x = star.xRatio * width;
+      const y = star.yRatio * height;
+
+      // Soft halo behind the star, sized and faded with the twinkle so
+      // brighter moments shine wider instead of just fading in place.
       ctx.globalAlpha = twinkle;
+      ctx.fillStyle = glowGradients[i];
       ctx.beginPath();
-      ctx.arc(star.xRatio * width, star.yRatio * height, star.radiusPx, 0, Math.PI * 2);
+      ctx.arc(x, y, star.radiusPx * STAR_GLOW_RADIUS_RATIO * (0.5 + 0.5 * twinkle), 0, Math.PI * 2);
       ctx.fill();
-    }
+
+      ctx.fillStyle = '#f4f7ff';
+      ctx.beginPath();
+      ctx.arc(x, y, star.radiusPx, 0, Math.PI * 2);
+      ctx.fill();
+    });
     ctx.globalAlpha = 1;
 
     const centerX = width * ORBIT_CENTER_X_RATIO;
