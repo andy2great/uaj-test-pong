@@ -37,6 +37,13 @@ const MAX_WALL_BOUNCES_PER_FRAME = 8; // safety bound on the per-frame wall-boun
 const IMPACT_DURATION_SECONDS = 0.25;
 const IMPACT_PARTICLE_COUNT = 6;
 
+// Screen shake: a brief, subtle global render-transform offset on high-impact
+// moments (power-up pickup, boosted paddle hits). Decays via `dt` in
+// update(), same pattern as `impacts`, and is read only by render() -- it
+// never feeds back into paddle input, ball physics, or collision outcomes.
+const SCREEN_SHAKE_DURATION_SECONDS = 0.18;
+const SCREEN_SHAKE_AMPLITUDE_RATIO = 0.012; // peak offset, fraction of canvas height
+
 // Pre-serve countdown ring: purely cosmetic, driven by `serveDelayRemaining`
 // and never feeds back into serve timing. Starts wide and shrinks down onto
 // the ball as the pause elapses, so it reads as a visible countdown rather
@@ -318,6 +325,7 @@ export class Game {
   giantPaddleRemaining2 = 0;
   extraBalls: ExtraBall[] = [];
   impacts: Impact[] = []; // active collision flashes/particle bursts, decayed in update()
+  screenShakeRemaining = 0; // seconds left of the current shake, decayed in update()
   backdropTime = 0; // seconds elapsed, drives the starfield twinkle and planet orbits
   winCelebrationElapsed = 0; // seconds since `winner` last became non-null, drives the win-screen celebration
   private hapticEvents: HapticEventKind[] = []; // queued since the last consumeHapticEvents() call
@@ -412,6 +420,7 @@ export class Game {
     this.giantPaddleRemaining2 = 0;
     this.extraBalls = [];
     this.impacts = [];
+    this.screenShakeRemaining = 0;
     this.hapticEvents = [];
     this.winCelebrationElapsed = 0;
     this.serve(width, height);
@@ -419,6 +428,12 @@ export class Game {
 
   private spawnImpact(x: number, y: number, kind: ImpactKind): void {
     this.impacts.push({ x, y, age: 0, kind });
+  }
+
+  // Resets (never accumulates) the shake countdown so overlapping triggers
+  // don't stack the effect beyond SCREEN_SHAKE_DURATION_SECONDS.
+  private triggerScreenShake(): void {
+    this.screenShakeRemaining = SCREEN_SHAKE_DURATION_SECONDS;
   }
 
   // Drains and returns the haptic events queued since the last call, for
@@ -570,6 +585,7 @@ export class Game {
     }
     this.activePowerUp = null;
     this.hapticEvents.push('power-up');
+    this.triggerScreenShake();
     const definition = POWER_UP_DEFINITIONS.find((entry) => entry.kind === powerUp.kind);
     definition?.activate(this);
   }
@@ -632,6 +648,9 @@ export class Game {
         ball.vy = vy;
         this.spawnImpact(ball.x, ball.y, 'paddle');
         this.hapticEvents.push('paddle-hit');
+        if (speed > height * BALL_SPEED_RATIO) {
+          this.triggerScreenShake();
+        }
         return 1;
       }
       if (
@@ -654,6 +673,9 @@ export class Game {
         ball.vy = vy;
         this.spawnImpact(ball.x, ball.y, 'paddle');
         this.hapticEvents.push('paddle-hit');
+        if (speed > height * BALL_SPEED_RATIO) {
+          this.triggerScreenShake();
+        }
         return 2;
       }
 
@@ -688,6 +710,10 @@ export class Game {
         impact.age += dt;
         return impact.age < IMPACT_DURATION_SECONDS;
       });
+    }
+
+    if (this.screenShakeRemaining > 0) {
+      this.screenShakeRemaining = Math.max(0, this.screenShakeRemaining - dt);
     }
 
     if (this.speedBoostRemaining1 > 0) {
@@ -1055,8 +1081,19 @@ export class Game {
     this.ensureInitialized(width, height);
 
     ctx.clearRect(0, 0, width, height);
+
+    // Screen shake offsets everything below via a canvas transform, never
+    // paddle/ball state. The background rect is overdrawn by the max shake
+    // margin on every side so the shifted frame still fully covers the
+    // canvas instead of leaving a sliver of the previous frame visible.
+    const shakeMargin = height * SCREEN_SHAKE_AMPLITUDE_RATIO;
+    const shakeT = this.screenShakeRemaining / SCREEN_SHAKE_DURATION_SECONDS;
+    const shakeAmount = shakeMargin * shakeT;
+    ctx.save();
+    ctx.translate((Math.random() * 2 - 1) * shakeAmount, (Math.random() * 2 - 1) * shakeAmount);
+
     ctx.fillStyle = '#0a1128';
-    ctx.fillRect(0, 0, width, height);
+    ctx.fillRect(-shakeMargin, -shakeMargin, width + shakeMargin * 2, height + shakeMargin * 2);
     this.renderBackdrop(ctx, width, height);
 
     const paddle1HalfWidth = this.paddleWidth(1, width) / 2;
@@ -1141,5 +1178,7 @@ export class Game {
       ctx.fillText('Tap to play again', width / 2, height / 2 + height * 0.04);
       ctx.restore();
     }
+
+    ctx.restore();
   }
 }
