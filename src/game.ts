@@ -108,6 +108,17 @@ const WIN_PARTICLES: WinParticle[] = Array.from({ length: WIN_PARTICLE_COUNT }, 
   color: WIN_PARTICLE_COLORS[i % WIN_PARTICLE_COLORS.length],
 }));
 
+// HUD: a subtle center-court divider plus a soft panel behind each score, so
+// the scoreboard reads as one designed element instead of numbers floating
+// directly on the starfield. Purely visual -- reads score1/score2 without
+// touching them.
+const HUD_DIVIDER_DASH_RATIO = 0.018; // dash length, fraction of canvas width
+const HUD_DIVIDER_GAP_RATIO = 0.014; // gap between dashes, fraction of canvas width
+const HUD_DIVIDER_LINE_WIDTH_RATIO = 0.0035; // stroke width, fraction of canvas height
+const HUD_PANEL_WIDTH_RATIO = 0.34; // panel width, fraction of canvas width
+const HUD_PANEL_HEIGHT_RATIO = 0.11; // panel height, fraction of canvas height
+const HUD_PANEL_RADIUS_RATIO = 0.28; // corner radius, fraction of panel height
+
 // Pointermove events fire often enough during a real drag that this cap is
 // imperceptible in normal play; it only becomes visible (and boostable) when
 // a power-up scales it up.
@@ -1103,6 +1114,54 @@ export class Game {
     ctx.restore();
   }
 
+  // Draws a soft, borderless panel centered at (centerX, centerY) that frames
+  // a score number, so it reads as sitting inside a designed treatment
+  // rather than floating unframed on the backdrop. Purely visual.
+  private renderScorePanel(
+    ctx: CanvasRenderingContext2D,
+    centerX: number,
+    centerY: number,
+    panelWidth: number,
+    panelHeight: number,
+    radius: number,
+  ): void {
+    const x = centerX - panelWidth / 2;
+    const y = centerY - panelHeight / 2;
+    ctx.save();
+    const vignette = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, panelWidth / 2);
+    vignette.addColorStop(0, 'rgba(232, 236, 245, 0.10)');
+    vignette.addColorStop(1, 'rgba(232, 236, 245, 0)');
+    ctx.fillStyle = vignette;
+    ctx.beginPath();
+    ctx.roundRect(x, y, panelWidth, panelHeight, radius);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(232, 236, 245, 0.22)';
+    ctx.lineWidth = panelHeight * 0.02;
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Draws the HUD: a dashed center-court divider separating the two players'
+  // halves, plus a score panel behind each score. Drawn above the backdrop
+  // but below the paddles/ball/impacts so it never obstructs gameplay.
+  private renderHud(ctx: CanvasRenderingContext2D, width: number, height: number): void {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(232, 236, 245, 0.18)';
+    ctx.lineWidth = height * HUD_DIVIDER_LINE_WIDTH_RATIO;
+    ctx.setLineDash([width * HUD_DIVIDER_DASH_RATIO, width * HUD_DIVIDER_GAP_RATIO]);
+    ctx.beginPath();
+    ctx.moveTo(0, height / 2);
+    ctx.lineTo(width, height / 2);
+    ctx.stroke();
+    ctx.restore();
+
+    const panelWidth = width * HUD_PANEL_WIDTH_RATIO;
+    const panelHeight = height * HUD_PANEL_HEIGHT_RATIO;
+    const panelRadius = panelHeight * HUD_PANEL_RADIUS_RATIO;
+    this.renderScorePanel(ctx, width / 2, height * 0.28, panelWidth, panelHeight, panelRadius);
+    this.renderScorePanel(ctx, width / 2, height * 0.72, panelWidth, panelHeight, panelRadius);
+  }
+
   render(ctx: CanvasRenderingContext2D, width: number, height: number): void {
     this.ensureInitialized(width, height);
 
@@ -1121,6 +1180,7 @@ export class Game {
     ctx.fillStyle = '#0a1128';
     ctx.fillRect(-shakeMargin, -shakeMargin, width + shakeMargin * 2, height + shakeMargin * 2);
     this.renderBackdrop(ctx, width, height);
+    this.renderHud(ctx, width, height);
 
     const paddle1HalfWidth = this.paddleWidth(1, width) / 2;
     const paddle2HalfWidth = this.paddleWidth(2, width) / 2;
