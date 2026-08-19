@@ -32,6 +32,11 @@ const WINNING_SCORE = 11; // first player to reach this score wins the match
 const SERVE_DELAY_SECONDS = 1; // pause after a point before the ball re-serves
 const MAX_WALL_BOUNCES_PER_FRAME = 8; // safety bound on the per-frame wall-bounce segment walk below
 
+// Ball-wall/ball-paddle impact flashes: purely cosmetic, decay via `dt` and
+// never feed back into collision timing or outcome.
+const IMPACT_DURATION_SECONDS = 0.25;
+const IMPACT_PARTICLE_COUNT = 6;
+
 // Pointermove events fire often enough during a real drag that this cap is
 // imperceptible in normal play; it only becomes visible (and boostable) when
 // a power-up scales it up.
@@ -140,6 +145,17 @@ interface Ball {
 // elapses or as soon as it exits the field, whichever comes first.
 interface ExtraBall extends Ball {
   remaining: number;
+}
+
+// A brief flash/particle burst spawned where a ball hits a wall or paddle.
+// `age` grows by `dt` each frame in `update` and the effect is dropped once
+// it reaches IMPACT_DURATION_SECONDS; purely visual, read only by render.
+type ImpactKind = 'paddle' | 'wall';
+interface Impact {
+  x: number;
+  y: number;
+  age: number;
+  kind: ImpactKind;
 }
 
 export type PowerUpKind = 'speed-boost' | 'fast-ball' | 'giant-paddle' | 'multi-ball';
@@ -258,6 +274,7 @@ export class Game {
   giantPaddleRemaining1 = 0;
   giantPaddleRemaining2 = 0;
   extraBalls: ExtraBall[] = [];
+  impacts: Impact[] = []; // active collision flashes/particle bursts, decayed in update()
   backdropTime = 0; // seconds elapsed, drives the starfield twinkle and planet orbits
 
   private initialized = false;
@@ -346,7 +363,12 @@ export class Game {
     this.giantPaddleRemaining1 = 0;
     this.giantPaddleRemaining2 = 0;
     this.extraBalls = [];
+    this.impacts = [];
     this.serve(width, height);
+  }
+
+  private spawnImpact(x: number, y: number, kind: ImpactKind): void {
+    this.impacts.push({ x, y, age: 0, kind });
   }
 
   onPointerDown(pointerId: number, x: number, y: number, width: number, height: number): void {
@@ -546,6 +568,7 @@ export class Game {
         const { vx, vy } = reflectOffPaddle(ball.x, this.paddle1X, paddle1Width, speed, true);
         ball.vx = vx;
         ball.vy = vy;
+        this.spawnImpact(ball.x, ball.y, 'paddle');
         return 1;
       }
       if (
@@ -566,6 +589,7 @@ export class Game {
         const { vx, vy } = reflectOffPaddle(ball.x, this.paddle2X, paddle2Width, speed, false);
         ball.vx = vx;
         ball.vy = vy;
+        this.spawnImpact(ball.x, ball.y, 'paddle');
         return 2;
       }
 
@@ -580,6 +604,7 @@ export class Game {
       segStartY = segEndY;
       ball.vx = -ball.vx;
       remaining *= 1 - wallT;
+      this.spawnImpact(segStartX, segStartY, 'wall');
     }
 
     ball.x = segStartX;
@@ -592,6 +617,13 @@ export class Game {
     this.lastHeight = height;
     this.lastWidth = width;
     this.backdropTime += dt;
+
+    if (this.impacts.length > 0) {
+      this.impacts = this.impacts.filter((impact) => {
+        impact.age += dt;
+        return impact.age < IMPACT_DURATION_SECONDS;
+      });
+    }
 
     if (this.speedBoostRemaining1 > 0) {
       this.speedBoostRemaining1 = Math.max(0, this.speedBoostRemaining1 - dt);
@@ -775,6 +807,65 @@ export class Game {
     ctx.fill();
   }
 
+  // Draws a paddle as a rounded, gradient-shaded bar with a drop shadow and a
+  // highlight strip near the top edge, so it reads as a raised 3D bar instead
+  // of a flat rectangle. Purely visual -- paddle position/width are untouched.
+  private renderPaddle(ctx: CanvasRenderingContext2D, centerX: number, centerY: number, halfWidth: number, paddleHeight: number): void {
+    const x = centerX - halfWidth;
+    const y = centerY - paddleHeight / 2;
+    const w = halfWidth * 2;
+
+    ctx.save();
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.45)';
+    ctx.shadowBlur = paddleHeight * 1.4;
+    ctx.shadowOffsetY = paddleHeight * 0.9;
+    const gradient = ctx.createLinearGradient(x, y, x, y + paddleHeight);
+    gradient.addColorStop(0, '#ffffff');
+    gradient.addColorStop(0.45, '#c7d0e8');
+    gradient.addColorStop(1, '#8a93b8');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(x, y, w, paddleHeight);
+    ctx.restore();
+
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
+    ctx.fillRect(x + w * 0.06, y + paddleHeight * 0.12, w * 0.88, paddleHeight * 0.22);
+  }
+
+  // Draws active collision flashes/particle bursts (see `impacts`); each one
+  // fades and expands as `impact.age` approaches IMPACT_DURATION_SECONDS.
+  private renderImpacts(ctx: CanvasRenderingContext2D, height: number): void {
+    if (this.impacts.length === 0) {
+      return;
+    }
+    const baseRadius = height * BALL_RADIUS_RATIO;
+    for (const impact of this.impacts) {
+      const t = clamp(impact.age / IMPACT_DURATION_SECONDS, 0, 1);
+      const fade = 1 - t;
+      const color = impact.kind === 'paddle' ? '255, 255, 255' : '255, 214, 102';
+
+      const flashRadius = baseRadius * (1.2 + t * 2.2);
+      const flashGradient = ctx.createRadialGradient(impact.x, impact.y, 0, impact.x, impact.y, flashRadius);
+      flashGradient.addColorStop(0, `rgba(${color}, ${0.65 * fade})`);
+      flashGradient.addColorStop(1, `rgba(${color}, 0)`);
+      ctx.fillStyle = flashGradient;
+      ctx.beginPath();
+      ctx.arc(impact.x, impact.y, flashRadius, 0, Math.PI * 2);
+      ctx.fill();
+
+      const particleDistance = baseRadius * (0.6 + t * 3);
+      const particleRadius = baseRadius * 0.22 * fade;
+      ctx.fillStyle = `rgba(${color}, ${0.8 * fade})`;
+      for (let i = 0; i < IMPACT_PARTICLE_COUNT; i += 1) {
+        const angle = (Math.PI * 2 * i) / IMPACT_PARTICLE_COUNT;
+        const px = impact.x + Math.cos(angle) * particleDistance;
+        const py = impact.y + Math.sin(angle) * particleDistance;
+        ctx.beginPath();
+        ctx.arc(px, py, particleRadius, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+  }
+
   render(ctx: CanvasRenderingContext2D, width: number, height: number): void {
     this.ensureInitialized(width, height);
 
@@ -789,9 +880,8 @@ export class Game {
     const paddle1Y = height * PADDLE_MARGIN_RATIO;
     const paddle2Y = height * (1 - PADDLE_MARGIN_RATIO);
 
-    ctx.fillStyle = '#e8ecf5';
-    ctx.fillRect(this.paddle1X - paddle1HalfWidth, paddle1Y - paddleHeight / 2, paddle1HalfWidth * 2, paddleHeight);
-    ctx.fillRect(this.paddle2X - paddle2HalfWidth, paddle2Y - paddleHeight / 2, paddle2HalfWidth * 2, paddleHeight);
+    this.renderPaddle(ctx, this.paddle1X, paddle1Y, paddle1HalfWidth, paddleHeight);
+    this.renderPaddle(ctx, this.paddle2X, paddle2Y, paddle2HalfWidth, paddleHeight);
 
     const ballRadius = height * BALL_RADIUS_RATIO;
     const cometBaseSpeed = height * BALL_SPEED_RATIO;
@@ -799,6 +889,7 @@ export class Game {
     for (const ball of balls) {
       this.renderComet(ctx, ball.x, ball.y, ball.vx, ball.vy, ballRadius, cometBaseSpeed);
     }
+    this.renderImpacts(ctx, height);
 
     if (this.activePowerUp !== null) {
       const powerUpRadius = height * POWER_UP_RADIUS_RATIO;
@@ -814,21 +905,31 @@ export class Game {
       ctx.fillText(visual.label, this.activePowerUp.x, this.activePowerUp.y);
     }
 
+    ctx.save();
     ctx.fillStyle = '#e8ecf5';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(120, 170, 255, 0.85)';
+    ctx.shadowBlur = height * 0.025;
     ctx.font = `${Math.round(height * 0.05)}px sans-serif`;
     ctx.fillText(String(this.score1), width / 2, height * 0.28);
     ctx.fillText(String(this.score2), width / 2, height * 0.72);
+    ctx.restore();
 
     if (this.winner !== null) {
       ctx.fillStyle = 'rgba(10, 17, 40, 0.85)';
       ctx.fillRect(0, 0, width, height);
+      ctx.save();
       ctx.fillStyle = '#e8ecf5';
+      ctx.textAlign = 'center';
+      ctx.textBaseline = 'middle';
+      ctx.shadowColor = 'rgba(120, 170, 255, 0.85)';
+      ctx.shadowBlur = height * 0.02;
       ctx.font = `${Math.round(height * 0.045)}px sans-serif`;
       ctx.fillText(`Player ${this.winner} wins`, width / 2, height / 2 - height * 0.04);
       ctx.font = `${Math.round(height * 0.025)}px sans-serif`;
       ctx.fillText('Tap to play again', width / 2, height / 2 + height * 0.04);
+      ctx.restore();
     }
   }
 }
