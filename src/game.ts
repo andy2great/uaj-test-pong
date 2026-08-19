@@ -158,16 +158,16 @@ export class Game {
   lastPaddleTouch: PaddleId | null = null; // paddle that most recently hit the ball this rally
   paddleSpeedMultiplier1 = 1;
   paddleSpeedMultiplier2 = 1;
-  speedBoostRemaining = 0;
+  speedBoostRemaining1 = 0;
+  speedBoostRemaining2 = 0;
   paddleWidthMultiplier1 = 1;
   paddleWidthMultiplier2 = 1;
-  giantPaddleRemaining = 0;
+  giantPaddleRemaining1 = 0;
+  giantPaddleRemaining2 = 0;
   extraBalls: ExtraBall[] = [];
 
   private initialized = false;
   private serveDelayRemaining = 0;
-  private speedBoostPaddle: PaddleId | null = null;
-  private giantPaddlePaddle: PaddleId | null = null;
   private powerUpSpawnTimer = POWER_UP_SPAWN_INTERVAL_SECONDS;
   private nextPowerUpId = 1;
   private lastHeight = 0;
@@ -245,12 +245,12 @@ export class Game {
     this.lastPaddleTouch = null;
     this.paddleSpeedMultiplier1 = 1;
     this.paddleSpeedMultiplier2 = 1;
-    this.speedBoostRemaining = 0;
-    this.speedBoostPaddle = null;
+    this.speedBoostRemaining1 = 0;
+    this.speedBoostRemaining2 = 0;
     this.paddleWidthMultiplier1 = 1;
     this.paddleWidthMultiplier2 = 1;
-    this.giantPaddleRemaining = 0;
-    this.giantPaddlePaddle = null;
+    this.giantPaddleRemaining1 = 0;
+    this.giantPaddleRemaining2 = 0;
     this.extraBalls = [];
     this.serve(width, height);
   }
@@ -316,11 +316,11 @@ export class Game {
     }
     if (paddle === 1) {
       this.paddleSpeedMultiplier1 = SPEED_BOOST_MULTIPLIER;
+      this.speedBoostRemaining1 = SPEED_BOOST_DURATION_SECONDS;
     } else {
       this.paddleSpeedMultiplier2 = SPEED_BOOST_MULTIPLIER;
+      this.speedBoostRemaining2 = SPEED_BOOST_DURATION_SECONDS;
     }
-    this.speedBoostPaddle = paddle;
-    this.speedBoostRemaining = SPEED_BOOST_DURATION_SECONDS;
   }
 
   activateFastBall(): void {
@@ -335,11 +335,11 @@ export class Game {
     }
     if (paddle === 1) {
       this.paddleWidthMultiplier1 = GIANT_PADDLE_MULTIPLIER;
+      this.giantPaddleRemaining1 = GIANT_PADDLE_DURATION_SECONDS;
     } else {
       this.paddleWidthMultiplier2 = GIANT_PADDLE_MULTIPLIER;
+      this.giantPaddleRemaining2 = GIANT_PADDLE_DURATION_SECONDS;
     }
-    this.giantPaddlePaddle = paddle;
-    this.giantPaddleRemaining = GIANT_PADDLE_DURATION_SECONDS;
     if (this.lastWidth > 0) {
       const halfWidth = this.paddleWidth(paddle, this.lastWidth) / 2;
       const clamped = clamp(paddle === 1 ? this.paddle1X : this.paddle2X, halfWidth, this.lastWidth - halfWidth);
@@ -498,27 +498,29 @@ export class Game {
     this.lastHeight = height;
     this.lastWidth = width;
 
-    if (this.speedBoostRemaining > 0) {
-      this.speedBoostRemaining = Math.max(0, this.speedBoostRemaining - dt);
-      if (this.speedBoostRemaining === 0 && this.speedBoostPaddle !== null) {
-        if (this.speedBoostPaddle === 1) {
-          this.paddleSpeedMultiplier1 = 1;
-        } else {
-          this.paddleSpeedMultiplier2 = 1;
-        }
-        this.speedBoostPaddle = null;
+    if (this.speedBoostRemaining1 > 0) {
+      this.speedBoostRemaining1 = Math.max(0, this.speedBoostRemaining1 - dt);
+      if (this.speedBoostRemaining1 === 0) {
+        this.paddleSpeedMultiplier1 = 1;
+      }
+    }
+    if (this.speedBoostRemaining2 > 0) {
+      this.speedBoostRemaining2 = Math.max(0, this.speedBoostRemaining2 - dt);
+      if (this.speedBoostRemaining2 === 0) {
+        this.paddleSpeedMultiplier2 = 1;
       }
     }
 
-    if (this.giantPaddleRemaining > 0) {
-      this.giantPaddleRemaining = Math.max(0, this.giantPaddleRemaining - dt);
-      if (this.giantPaddleRemaining === 0 && this.giantPaddlePaddle !== null) {
-        if (this.giantPaddlePaddle === 1) {
-          this.paddleWidthMultiplier1 = 1;
-        } else {
-          this.paddleWidthMultiplier2 = 1;
-        }
-        this.giantPaddlePaddle = null;
+    if (this.giantPaddleRemaining1 > 0) {
+      this.giantPaddleRemaining1 = Math.max(0, this.giantPaddleRemaining1 - dt);
+      if (this.giantPaddleRemaining1 === 0) {
+        this.paddleWidthMultiplier1 = 1;
+      }
+    }
+    if (this.giantPaddleRemaining2 > 0) {
+      this.giantPaddleRemaining2 = Math.max(0, this.giantPaddleRemaining2 - dt);
+      if (this.giantPaddleRemaining2 === 0) {
+        this.paddleWidthMultiplier2 = 1;
       }
     }
 
