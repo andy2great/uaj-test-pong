@@ -191,10 +191,10 @@ describe('Game paddle control', () => {
     expect(game.paddle1X).toBe(100);
     expect(game.paddle2X).toBe(300);
 
-    game.onPointerMove(1, 150, 400);
-    game.onPointerMove(2, 250, 400);
-    expect(game.paddle1X).toBe(150);
-    expect(game.paddle2X).toBe(250);
+    game.onPointerMove(1, 110, 400); // small delta, within the per-event step cap
+    game.onPointerMove(2, 290, 400);
+    expect(game.paddle1X).toBe(110);
+    expect(game.paddle2X).toBe(290);
   });
 
   it('ignores pointermove for a pointer that never went down', () => {
@@ -519,6 +519,56 @@ describe('Game power-ups', () => {
     expect(paddle1XAfterUnboosted).toBeCloseTo(400 * PADDLE_MOVE_STEP_RATIO);
     expect(paddle1XAfterBoosted).toBeCloseTo(400 * PADDLE_MOVE_STEP_RATIO * SPEED_BOOST_MULTIPLIER);
     expect(paddle1XAfterBoosted).toBeGreaterThan(paddle1XAfterUnboosted);
+  });
+
+  it('caps a single drag event to a small enough step that a full-width flick spans several pointermove events', () => {
+    // Regression test for #53: PADDLE_MOVE_STEP_RATIO must be low enough to
+    // actually bind during a real drag, otherwise the Speed Boost multiplier
+    // scales a cap that was never the bottleneck and has no visible effect.
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.onPointerDown(1, 200, 50, 400, 800);
+
+    game.paddle1X = 0;
+    game.onPointerMove(1, 400, 400); // one drag event, all the way across the canvas
+    expect(game.paddle1X).toBeLessThan(400 * 0.2); // far from snapping instantly to the target
+  });
+
+  it('lets a boosted paddle cross the canvas in noticeably fewer drag events than baseline', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.onPointerDown(1, 200, 50, 400, 800);
+
+    // 340 sits within the paddle's reachable range (it is clamped to keep the
+    // whole paddle on-canvas), so this is a real reachable target rather than
+    // one that gets stuck short of it because of that separate clamp.
+    const target = 340;
+    const eventsToCross = (multiplier: number): number => {
+      game.paddle1X = 0;
+      game.paddleSpeedMultiplier1 = multiplier;
+      let events = 0;
+      while (game.paddle1X < target - 1e-6 && events < 1000) {
+        game.onPointerMove(1, target, 400);
+        events++;
+      }
+      return events;
+    };
+
+    const unboostedEvents = eventsToCross(1);
+    const boostedEvents = eventsToCross(SPEED_BOOST_MULTIPLIER);
+
+    // With a non-binding cap this gap is only a single event (imperceptible);
+    // a real fix must make the difference clearly perceptible during play.
+    expect(unboostedEvents - boostedEvents).toBeGreaterThanOrEqual(3);
+  });
+
+  it('does not clamp small, normal-speed drag deltas, so baseline dragging still tracks the finger 1:1', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.onPointerDown(1, 200, 50, 400, 800);
+
+    game.onPointerMove(1, 210, 400); // a small, realistic per-event delta from continuous dragging
+    expect(game.paddle1X).toBe(210);
   });
 
   it('reverts the Speed Boost automatically once its duration elapses', () => {

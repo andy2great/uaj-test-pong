@@ -120,10 +120,13 @@ const HUD_PANEL_WIDTH_RATIO = 0.34; // panel width, fraction of canvas width
 const HUD_PANEL_HEIGHT_RATIO = 0.11; // panel height, fraction of canvas height
 const HUD_PANEL_RADIUS_RATIO = 0.28; // corner radius, fraction of panel height
 
-// Pointermove events fire often enough during a real drag that this cap is
-// imperceptible in normal play; it only becomes visible (and boostable) when
-// a power-up scales it up.
-export const PADDLE_MOVE_STEP_RATIO = 0.3; // max fraction of canvas width a paddle may travel per drag event
+// Kept low enough to be an actual per-event speed limit (not just a safety
+// clamp) so that scaling it via a power-up produces a real, perceptible
+// change in how fast the paddle catches up to the finger during a drag.
+// Normal one-thumb dragging still tracks the finger closely because
+// pointermove fires many times per second, so per-event deltas rarely
+// exceed this cap outside of very fast full-width flicks.
+export const PADDLE_MOVE_STEP_RATIO = 0.05; // max fraction of canvas width a paddle may travel per drag event
 export const POWER_UP_SPAWN_INTERVAL_SECONDS = 6; // gap between power-up spawns during an active rally
 const POWER_UP_RADIUS_RATIO = 0.03; // fraction of canvas height
 export const SPEED_BOOST_MULTIPLIER = 1.6;
@@ -529,8 +532,9 @@ export class Game {
     }
   }
 
-  // Like movePaddle, but rate-limited to PADDLE_MOVE_STEP_RATIO per call so a
-  // Speed Boost (which scales the limit) has a visible effect.
+  // Like movePaddle, but rate-limited to PADDLE_MOVE_STEP_RATIO per call so
+  // paddle speed is an actual gameplay quantity: Speed Boost (which scales
+  // the limit) now visibly changes how fast the paddle can catch up.
   private dragPaddle(paddle: PaddleId, x: number, width: number): void {
     const halfWidth = this.paddleWidth(paddle, width) / 2;
     const target = clamp(x, halfWidth, width - halfWidth);
