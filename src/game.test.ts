@@ -15,12 +15,16 @@ import {
   reflectOffPaddle,
 } from './game';
 
-// Dismisses the title screen and clears the pre-serve pause, matching what a
-// player does on first load, so tests can exercise active gameplay directly.
+// Dismisses the title screen, picks the Earth map, and clears the pre-serve
+// pause, matching what a player does on first load, so tests can exercise
+// active gameplay directly. The map button's center sits at height * 0.43
+// regardless of canvas size -- see the "Game map select" tests below, which
+// derive the same ratio from the button layout constants.
 function startGame(width = 400, height = 800): Game {
   const game = new Game();
   game.update(0, width, height); // initializes, shows the title screen
-  game.onPointerDown(-1, width / 2, height / 2, width, height); // dismiss the title screen, starts the first-serve countdown
+  game.onPointerDown(-1, width / 2, height / 2, width, height); // dismiss the title screen, shows map-select
+  game.onPointerDown(-1, width / 2, height * 0.43, width, height); // taps the Earth button, starts the first-serve countdown
   game.update(2, width, height); // clears the pre-serve pause and serves the ball
   return game;
 }
@@ -97,15 +101,25 @@ describe('Game title screen', () => {
     expect(game.ballVY).toBe(0);
   });
 
-  it('dismisses the title screen and starts the first-serve countdown on tap', () => {
+  it('dismisses the title screen into map-select, then starts the first-serve countdown once a map is tapped', () => {
     const game = new Game();
     game.update(0, 400, 800);
 
-    game.onPointerDown(1, 200, 400, 400, 800);
+    game.onPointerDown(1, 200, 400, 400, 800); // a tap anywhere dismisses the title screen
 
     expect(game.titleScreenActive).toBe(false);
+    expect(game.mapSelectActive).toBe(true);
     expect(game.ballVX).toBe(0);
-    expect(game.ballVY).toBe(0); // still paused, waiting out the pre-serve countdown
+    expect(game.ballVY).toBe(0); // still paused, waiting for a map to be picked
+
+    game.update(2, 400, 800); // map-select also pauses gameplay, same as the title screen
+    expect(game.ballVX).toBe(0);
+    expect(game.ballVY).toBe(0);
+
+    game.onPointerDown(1, 200, 800 * 0.43, 400, 800); // taps the Earth button
+
+    expect(game.mapSelectActive).toBe(false);
+    expect(game.selectedMap).toBe('earth');
 
     game.update(2, 400, 800); // longer than the serve delay
 
@@ -127,6 +141,93 @@ describe('Game title screen', () => {
 
     expect(game.winner).toBeNull();
     expect(game.titleScreenActive).toBe(false);
+  });
+});
+
+describe('Game map select', () => {
+  // Button centers are ratios of height alone (see startGame's comment above),
+  // so these hold for any canvas size: Earth's button sits at 0.43, Mars's at 0.57.
+  const EARTH_BUTTON_Y_RATIO = 0.43;
+  const MARS_BUTTON_Y_RATIO = 0.57;
+
+  it('has no map selected while the map-select screen is up', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.onPointerDown(1, 200, 400, 400, 800); // dismiss the title screen
+
+    expect(game.mapSelectActive).toBe(true);
+    expect(game.selectedMap).toBeNull();
+  });
+
+  it('selects Earth and starts the serve countdown when its button is tapped', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.onPointerDown(1, 200, 400, 400, 800); // dismiss the title screen
+
+    game.onPointerDown(1, 200, 800 * EARTH_BUTTON_Y_RATIO, 400, 800);
+
+    expect(game.mapSelectActive).toBe(false);
+    expect(game.selectedMap).toBe('earth');
+
+    game.update(2, 400, 800);
+    expect(game.ballVX !== 0 || game.ballVY !== 0).toBe(true);
+  });
+
+  it('selects Mars and starts the serve countdown when its button is tapped', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.onPointerDown(1, 200, 400, 400, 800); // dismiss the title screen
+
+    game.onPointerDown(1, 200, 800 * MARS_BUTTON_Y_RATIO, 400, 800);
+
+    expect(game.mapSelectActive).toBe(false);
+    expect(game.selectedMap).toBe('mars');
+
+    game.update(2, 400, 800);
+    expect(game.ballVX !== 0 || game.ballVY !== 0).toBe(true);
+  });
+
+  it('ignores taps that miss both map buttons, staying on the map-select screen', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.onPointerDown(1, 200, 400, 400, 800); // dismiss the title screen
+
+    game.onPointerDown(1, 200, 400, 400, 800); // dead center, between the two buttons
+
+    expect(game.mapSelectActive).toBe(true);
+    expect(game.selectedMap).toBeNull();
+  });
+
+  it('keeps the same map through restartMatch instead of returning to map-select', () => {
+    const game = startGame(); // picks Earth
+    expect(game.selectedMap).toBe('earth');
+
+    for (let i = 0; i < 11; i += 1) {
+      game.ballY = 900;
+      game.ballVY = 300;
+      game.update(0.001, 400, 800);
+      game.update(2, 400, 800);
+    }
+    expect(game.winner).toBe(1);
+
+    game.onPointerDown(1, 200, 400, 400, 800); // taps the game-over state to restart
+
+    expect(game.winner).toBeNull();
+    expect(game.mapSelectActive).toBe(false);
+    expect(game.selectedMap).toBe('earth');
+  });
+
+  it('does not affect the ball launch speed, only which map was picked', () => {
+    const earthGame = startGame(); // picks Earth
+    const marsGame = new Game();
+    marsGame.update(0, 400, 800);
+    marsGame.onPointerDown(1, 200, 400, 400, 800);
+    marsGame.onPointerDown(1, 200, 800 * MARS_BUTTON_Y_RATIO, 400, 800);
+    marsGame.update(2, 400, 800);
+
+    const earthSpeed = Math.hypot(earthGame.ballVX, earthGame.ballVY);
+    const marsSpeed = Math.hypot(marsGame.ballVX, marsGame.ballVY);
+    expect(marsSpeed).toBeCloseTo(earthSpeed);
   });
 });
 
