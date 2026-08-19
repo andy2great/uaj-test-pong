@@ -17,6 +17,8 @@ const PADDLE_MARGIN_RATIO = 0.06; // distance from top/bottom edge, fraction of 
 const BALL_RADIUS_RATIO = 0.016; // fraction of canvas height
 const BALL_SPEED_RATIO = 0.55; // canvas-heights per second
 const MAX_BOUNCE_ANGLE = Math.PI / 3; // 60 degrees from vertical at the paddle edges
+const WINNING_SCORE = 11; // first player to reach this score wins the match
+const SERVE_DELAY_SECONDS = 1; // pause after a point before the ball re-serves
 
 type PaddleId = 1 | 2;
 
@@ -47,8 +49,12 @@ export class Game {
   ballY = 0;
   ballVX = 0;
   ballVY = 0;
+  score1 = 0; // player 1 (top) score
+  score2 = 0; // player 2 (bottom) score
+  winner: PaddleId | null = null;
 
   private initialized = false;
+  private serveDelayRemaining = 0;
   private readonly pointerPaddle = new Map<number, PaddleId>();
 
   private ensureInitialized(width: number, height: number): void {
@@ -57,11 +63,12 @@ export class Game {
     }
     this.paddle1X = width / 2;
     this.paddle2X = width / 2;
-    this.resetBall(width, height);
+    this.serve(width, height);
     this.initialized = true;
   }
 
-  private resetBall(width: number, height: number): void {
+  // Centers the ball and immediately launches it in a random diagonal direction.
+  private serve(width: number, height: number): void {
     this.ballX = width / 2;
     this.ballY = height / 2;
     const speed = height * BALL_SPEED_RATIO;
@@ -74,8 +81,42 @@ export class Game {
     this.ballVY = Math.cos(angleFromVertical) * speed * ySign;
   }
 
+  // Centers the ball with zero velocity and starts the pre-serve pause.
+  private awardPoint(scorer: PaddleId, width: number, height: number): void {
+    if (scorer === 1) {
+      this.score1 += 1;
+    } else {
+      this.score2 += 1;
+    }
+    if (this.score1 >= WINNING_SCORE) {
+      this.winner = 1;
+    } else if (this.score2 >= WINNING_SCORE) {
+      this.winner = 2;
+    }
+
+    this.ballX = width / 2;
+    this.ballY = height / 2;
+    this.ballVX = 0;
+    this.ballVY = 0;
+    if (this.winner === null) {
+      this.serveDelayRemaining = SERVE_DELAY_SECONDS;
+    }
+  }
+
+  private restartMatch(width: number, height: number): void {
+    this.score1 = 0;
+    this.score2 = 0;
+    this.winner = null;
+    this.serveDelayRemaining = 0;
+    this.serve(width, height);
+  }
+
   onPointerDown(pointerId: number, x: number, y: number, width: number, height: number): void {
     this.ensureInitialized(width, height);
+    if (this.winner !== null) {
+      this.restartMatch(width, height);
+      return;
+    }
     const paddle: PaddleId = y < height / 2 ? 1 : 2;
     this.pointerPaddle.set(pointerId, paddle);
     this.movePaddle(paddle, x, width);
@@ -105,6 +146,18 @@ export class Game {
 
   update(dt: number, width: number, height: number): void {
     this.ensureInitialized(width, height);
+
+    if (this.winner !== null) {
+      return;
+    }
+
+    if (this.serveDelayRemaining > 0) {
+      this.serveDelayRemaining = Math.max(0, this.serveDelayRemaining - dt);
+      if (this.serveDelayRemaining === 0) {
+        this.serve(width, height);
+      }
+      return;
+    }
 
     this.ballX += this.ballVX * dt;
     this.ballY += this.ballVY * dt;
@@ -151,8 +204,12 @@ export class Game {
       this.ballVY = vy;
     }
 
-    if (this.ballY + radius < 0 || this.ballY - radius > height) {
-      this.resetBall(width, height);
+    if (this.ballY + radius < 0) {
+      // Ball exited past the top edge: bottom player (player 2) scores.
+      this.awardPoint(2, width, height);
+    } else if (this.ballY - radius > height) {
+      // Ball exited past the bottom edge: top player (player 1) scores.
+      this.awardPoint(1, width, height);
     }
   }
 
@@ -176,5 +233,22 @@ export class Game {
     ctx.arc(this.ballX, this.ballY, height * BALL_RADIUS_RATIO, 0, Math.PI * 2);
     ctx.fillStyle = '#5b8cff';
     ctx.fill();
+
+    ctx.fillStyle = '#e8ecf5';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.font = `${Math.round(height * 0.05)}px sans-serif`;
+    ctx.fillText(String(this.score1), width / 2, height * 0.28);
+    ctx.fillText(String(this.score2), width / 2, height * 0.72);
+
+    if (this.winner !== null) {
+      ctx.fillStyle = 'rgba(10, 17, 40, 0.85)';
+      ctx.fillRect(0, 0, width, height);
+      ctx.fillStyle = '#e8ecf5';
+      ctx.font = `${Math.round(height * 0.045)}px sans-serif`;
+      ctx.fillText(`Player ${this.winner} wins`, width / 2, height / 2 - height * 0.04);
+      ctx.font = `${Math.round(height * 0.025)}px sans-serif`;
+      ctx.fillText('Tap to play again', width / 2, height / 2 + height * 0.04);
+    }
   }
 }

@@ -192,3 +192,108 @@ describe('Game ball physics', () => {
     expect(game.ballY).toBe(400);
   });
 });
+
+describe('Game scoring', () => {
+  it('awards a point to the bottom player when the ball exits past the top edge', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.ballY = -100;
+    game.ballVY = -300;
+
+    game.update(0.001, 400, 800);
+
+    expect(game.score2).toBe(1);
+    expect(game.score1).toBe(0);
+  });
+
+  it('awards a point to the top player when the ball exits past the bottom edge', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.ballY = 900;
+    game.ballVY = 300;
+
+    game.update(0.001, 400, 800);
+
+    expect(game.score1).toBe(1);
+    expect(game.score2).toBe(0);
+  });
+
+  it('parks the ball at the center with zero velocity during the post-point serve delay', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.ballY = -100;
+    game.ballVY = -300;
+
+    game.update(0.001, 400, 800);
+
+    expect(game.ballVX).toBe(0);
+    expect(game.ballVY).toBe(0);
+    expect(game.ballX).toBe(200);
+    expect(game.ballY).toBe(400);
+  });
+
+  it('re-serves the ball with velocity once the serve delay elapses', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.ballY = -100;
+    game.ballVY = -300;
+    game.update(0.001, 400, 800); // scores the point and starts the serve delay
+
+    game.update(2, 400, 800); // longer than the serve delay
+
+    expect(game.ballVX !== 0 || game.ballVY !== 0).toBe(true);
+  });
+
+  it('declares a winner once a player reaches the winning score', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+
+    for (let i = 0; i < 11; i += 1) {
+      game.ballY = 900;
+      game.ballVY = 300;
+      game.update(0.001, 400, 800); // scores for player 1
+      game.update(2, 400, 800); // clears the serve delay for the next point
+    }
+
+    expect(game.score1).toBe(11);
+    expect(game.winner).toBe(1);
+  });
+
+  it('stops updating the ball once the match is won', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+
+    for (let i = 0; i < 11; i += 1) {
+      game.ballY = 900;
+      game.ballVY = 300;
+      game.update(0.001, 400, 800);
+      game.update(2, 400, 800);
+    }
+    expect(game.winner).toBe(1);
+
+    game.ballY = 900;
+    game.ballVY = 300;
+    game.update(0.001, 400, 800);
+
+    expect(game.score1).toBe(11); // no further scoring after the match ends
+  });
+
+  it('restarts the match with both scores reset when tapping the game-over state', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+
+    for (let i = 0; i < 11; i += 1) {
+      game.ballY = 900;
+      game.ballVY = 300;
+      game.update(0.001, 400, 800);
+      game.update(2, 400, 800);
+    }
+    expect(game.winner).toBe(1);
+
+    game.onPointerDown(1, 200, 400, 400, 800);
+
+    expect(game.winner).toBeNull();
+    expect(game.score1).toBe(0);
+    expect(game.score2).toBe(0);
+  });
+});
