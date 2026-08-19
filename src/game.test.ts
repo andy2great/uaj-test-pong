@@ -896,3 +896,76 @@ describe('Game haptic events', () => {
     expect(game.consumeHapticEvents()).toEqual([]);
   });
 });
+
+describe('Game screen shake', () => {
+  it('triggers a screen shake when a power-up is collected', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.lastPaddleTouch = 1;
+    game.activePowerUp = { id: 1, kind: 'speed-boost', x: game.ballX, y: game.ballY };
+
+    game.update(0, 400, 800);
+
+    expect(game.screenShakeRemaining).toBeGreaterThan(0);
+  });
+
+  it('triggers a screen shake on a paddle hit above the base launch speed', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.paddle1X = 200;
+    game.ballX = 200;
+    game.ballY = 60;
+    game.ballVX = 0;
+    game.ballVY = -600; // base launch speed on an 800px-tall canvas is 800 * 0.55 = 440
+
+    game.update(0.05, 400, 800);
+
+    expect(game.screenShakeRemaining).toBeGreaterThan(0);
+  });
+
+  it('does not trigger a screen shake on a normal-speed paddle hit', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.paddle1X = 200;
+    game.ballX = 200;
+    game.ballY = 60;
+    game.ballVX = 0;
+    game.ballVY = -300; // below the 440px/s base launch speed
+
+    game.update(0.05, 400, 800);
+
+    expect(game.screenShakeRemaining).toBe(0);
+  });
+
+  it('decays the shake to zero via dt and never lets it persist', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.lastPaddleTouch = 1;
+    game.activePowerUp = { id: 1, kind: 'speed-boost', x: game.ballX, y: game.ballY };
+    game.ballVX = 0;
+    game.ballVY = 0; // freeze the ball so the rally does not end during the wait
+    game.update(0, 400, 800); // triggers the shake
+    expect(game.screenShakeRemaining).toBeGreaterThan(0);
+
+    game.update(1, 400, 800); // far longer than the shake duration
+
+    expect(game.screenShakeRemaining).toBe(0);
+  });
+
+  it('does not accumulate across overlapping triggers', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.lastPaddleTouch = 1;
+    game.activePowerUp = { id: 1, kind: 'speed-boost', x: game.ballX, y: game.ballY };
+    game.ballVX = 0;
+    game.ballVY = 0; // freeze the ball so the rally does not end during the wait
+    game.update(0, 400, 800); // first trigger
+    const firstRemaining = game.screenShakeRemaining;
+
+    game.update(0.01, 400, 800); // let it partially decay
+    game.activePowerUp = { id: 2, kind: 'fast-ball', x: game.ballX, y: game.ballY };
+    game.update(0, 400, 800); // second trigger before the first fully decays
+
+    expect(game.screenShakeRemaining).toBe(firstRemaining);
+  });
+});
