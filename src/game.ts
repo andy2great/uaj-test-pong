@@ -16,6 +16,17 @@ const PADDLE_HEIGHT_RATIO = 0.018; // fraction of canvas height
 const PADDLE_MARGIN_RATIO = 0.06; // distance from top/bottom edge, fraction of canvas height
 const BALL_RADIUS_RATIO = 0.016; // fraction of canvas height
 const BALL_SPEED_RATIO = 0.55; // canvas-heights per second
+
+// Comet tail tuning (purely cosmetic, does not affect BALL_RADIUS_RATIO or
+// physics). Speed is normalized against BALL_SPEED_RATIO so the tail reads
+// as "faster comet" when a Fast Ball power-up (or any other speed change)
+// pushes the ball past its base launch speed.
+const COMET_MAX_SPEED_FACTOR = 2.2; // caps how much extra speed keeps growing the tail
+const COMET_GLOW_RADIUS_RATIO = 3.2; // glow radius, multiple of ball radius
+const COMET_TAIL_BASE_LENGTH_RATIO = 1.6; // tail length at rest, multiple of ball radius
+const COMET_TAIL_SPEED_LENGTH_RATIO = 3.2; // extra tail length per unit of speed factor
+const COMET_TAIL_BASE_OPACITY = 0.25;
+const COMET_TAIL_SPEED_OPACITY = 0.5;
 const MAX_BOUNCE_ANGLE = Math.PI / 3; // 60 degrees from vertical at the paddle edges
 const WINNING_SCORE = 11; // first player to reach this score wins the match
 const SERVE_DELAY_SECONDS = 1; // pause after a point before the ball re-serves
@@ -706,6 +717,64 @@ export class Game {
     }
   }
 
+  // Draws the ball as an Outer Wilds-style comet: a glowing core plus a tail
+  // that points opposite the current velocity and grows longer/brighter with
+  // speed. Purely visual -- collision radius/position/physics are untouched.
+  private renderComet(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    vx: number,
+    vy: number,
+    radius: number,
+    baseSpeed: number,
+  ): void {
+    const speed = Math.hypot(vx, vy);
+    const speedFactor = baseSpeed > 0 ? clamp(speed / baseSpeed, 0, COMET_MAX_SPEED_FACTOR) : 0;
+
+    // Points opposite the velocity vector; falls back to straight up when
+    // the ball is momentarily stationary (e.g. during the pre-serve pause).
+    const dirX = speed > 1e-3 ? -vx / speed : 0;
+    const dirY = speed > 1e-3 ? -vy / speed : -1;
+
+    const tailLength = radius * (COMET_TAIL_BASE_LENGTH_RATIO + COMET_TAIL_SPEED_LENGTH_RATIO * speedFactor);
+    const tailOpacity = clamp(COMET_TAIL_BASE_OPACITY + COMET_TAIL_SPEED_OPACITY * speedFactor, 0, 0.9);
+    const tipX = x + dirX * tailLength;
+    const tipY = y + dirY * tailLength;
+    const perpX = -dirY * radius * 0.85;
+    const perpY = dirX * radius * 0.85;
+
+    const tailGradient = ctx.createLinearGradient(x, y, tipX, tipY);
+    tailGradient.addColorStop(0, `rgba(214, 228, 255, ${tailOpacity})`);
+    tailGradient.addColorStop(1, 'rgba(214, 228, 255, 0)');
+    ctx.fillStyle = tailGradient;
+    ctx.beginPath();
+    ctx.moveTo(x + perpX, y + perpY);
+    ctx.lineTo(x - perpX, y - perpY);
+    ctx.lineTo(tipX, tipY);
+    ctx.closePath();
+    ctx.fill();
+
+    const glowRadius = radius * COMET_GLOW_RADIUS_RATIO;
+    const glowGradient = ctx.createRadialGradient(x, y, 0, x, y, glowRadius);
+    glowGradient.addColorStop(0, 'rgba(214, 228, 255, 0.9)');
+    glowGradient.addColorStop(0.4, 'rgba(120, 170, 255, 0.35)');
+    glowGradient.addColorStop(1, 'rgba(120, 170, 255, 0)');
+    ctx.fillStyle = glowGradient;
+    ctx.beginPath();
+    ctx.arc(x, y, glowRadius, 0, Math.PI * 2);
+    ctx.fill();
+
+    const coreGradient = ctx.createRadialGradient(x - radius * 0.3, y - radius * 0.3, 0, x, y, radius);
+    coreGradient.addColorStop(0, '#ffffff');
+    coreGradient.addColorStop(0.5, '#cfe0ff');
+    coreGradient.addColorStop(1, '#5b8cff');
+    ctx.fillStyle = coreGradient;
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
   render(ctx: CanvasRenderingContext2D, width: number, height: number): void {
     this.ensureInitialized(width, height);
 
@@ -725,11 +794,10 @@ export class Game {
     ctx.fillRect(this.paddle2X - paddle2HalfWidth, paddle2Y - paddleHeight / 2, paddle2HalfWidth * 2, paddleHeight);
 
     const ballRadius = height * BALL_RADIUS_RATIO;
-    ctx.fillStyle = '#5b8cff';
-    for (const ball of [{ x: this.ballX, y: this.ballY }, ...this.extraBalls]) {
-      ctx.beginPath();
-      ctx.arc(ball.x, ball.y, ballRadius, 0, Math.PI * 2);
-      ctx.fill();
+    const cometBaseSpeed = height * BALL_SPEED_RATIO;
+    const balls: Ball[] = [{ x: this.ballX, y: this.ballY, vx: this.ballVX, vy: this.ballVY }, ...this.extraBalls];
+    for (const ball of balls) {
+      this.renderComet(ctx, ball.x, ball.y, ball.vx, ball.vy, ballRadius, cometBaseSpeed);
     }
 
     if (this.activePowerUp !== null) {
