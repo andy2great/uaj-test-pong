@@ -441,6 +441,25 @@ describe('Game power-ups', () => {
     expect(Math.hypot(game.ballVX, game.ballVY)).toBeCloseTo(boostedSpeed);
   });
 
+  it('still bounces off a paddle when a stacked Fast Ball speed would otherwise skip past the collision band in one frame', () => {
+    const game = new Game();
+    game.update(0, 400, 800); // initialize
+
+    // Reproduces issue #15: speed reached after ~6 stacked Fast Ball pickups
+    // (440 * FAST_BALL_MULTIPLIER^6 =~ 2663.5px/s on an 800px-tall canvas),
+    // starting just above the paddle's collision band ([28, 68]) so a single
+    // 1/60s frame would jump clean over it under the old end-of-frame-only check.
+    game.paddle1X = game.ballX;
+    game.ballY = 68.5;
+    game.ballVX = 0;
+    game.ballVY = -2663.5;
+
+    game.update(1 / 60, 400, 800);
+
+    expect(game.ballVY).toBeGreaterThan(0); // rebounds downward instead of tunneling through
+    expect(game.score2).toBe(0); // player 2 must not be awarded an undeserved point
+  });
+
   it('ignores a power-up the ball has not reached yet', () => {
     const game = new Game();
     game.update(0, 400, 800);

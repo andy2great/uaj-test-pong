@@ -353,6 +353,12 @@ export class Game {
   // primary ball and every Multi-Ball bonus ball so their physics never
   // diverge.
   private stepBallPhysics(ball: Ball, dt: number, width: number, height: number): PaddleId | null {
+    // Boosted (e.g. stacked Fast Ball) speeds can move the ball farther than
+    // the paddle's collision band in a single frame, so the far-side bound of
+    // each paddle check below is tested against the ball's pre-move position
+    // rather than its post-move one: that way a frame whose path crosses the
+    // whole band still registers a bounce even if the ball ends up past it.
+    const startY = ball.y;
     ball.x += ball.vx * dt;
     ball.y += ball.vy * dt;
 
@@ -379,7 +385,7 @@ export class Game {
     if (
       ball.vy < 0 &&
       ball.y - radius <= paddle1Y + paddleHeight / 2 &&
-      ball.y + radius >= paddle1Y - paddleHeight / 2 &&
+      startY + radius >= paddle1Y - paddleHeight / 2 &&
       overlapsPaddleX(this.paddle1X, paddle1Width / 2)
     ) {
       ball.y = paddle1Y + paddleHeight / 2 + radius;
@@ -391,7 +397,7 @@ export class Game {
     if (
       ball.vy > 0 &&
       ball.y + radius >= paddle2Y - paddleHeight / 2 &&
-      ball.y - radius <= paddle2Y + paddleHeight / 2 &&
+      startY - radius <= paddle2Y + paddleHeight / 2 &&
       overlapsPaddleX(this.paddle2X, paddle2Width / 2)
     ) {
       ball.y = paddle2Y - paddleHeight / 2 - radius;
