@@ -15,6 +15,16 @@ import {
   reflectOffPaddle,
 } from './game';
 
+// Dismisses the title screen and clears the pre-serve pause, matching what a
+// player does on first load, so tests can exercise active gameplay directly.
+function startGame(width = 400, height = 800): Game {
+  const game = new Game();
+  game.update(0, width, height); // initializes, shows the title screen
+  game.onPointerDown(-1, width / 2, height / 2, width, height); // dismiss the title screen, starts the first-serve countdown
+  game.update(2, width, height); // clears the pre-serve pause and serves the ball
+  return game;
+}
+
 describe('clamp', () => {
   it('returns the value when inside the range', () => {
     expect(clamp(5, 0, 10)).toBe(5);
@@ -77,6 +87,49 @@ describe('orbitPosition', () => {
   });
 });
 
+describe('Game title screen', () => {
+  it('shows the title screen on first load, before the first serve', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+
+    expect(game.titleScreenActive).toBe(true);
+    expect(game.ballVX).toBe(0);
+    expect(game.ballVY).toBe(0);
+  });
+
+  it('dismisses the title screen and starts the first-serve countdown on tap', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+
+    game.onPointerDown(1, 200, 400, 400, 800);
+
+    expect(game.titleScreenActive).toBe(false);
+    expect(game.ballVX).toBe(0);
+    expect(game.ballVY).toBe(0); // still paused, waiting out the pre-serve countdown
+
+    game.update(2, 400, 800); // longer than the serve delay
+
+    expect(game.ballVX !== 0 || game.ballVY !== 0).toBe(true);
+  });
+
+  it('does not reappear after a match win and reset', () => {
+    const game = startGame();
+
+    for (let i = 0; i < 11; i += 1) {
+      game.ballY = 900;
+      game.ballVY = 300;
+      game.update(0.001, 400, 800);
+      game.update(2, 400, 800);
+    }
+    expect(game.winner).toBe(1);
+
+    game.onPointerDown(1, 200, 400, 400, 800); // taps the game-over state to restart
+
+    expect(game.winner).toBeNull();
+    expect(game.titleScreenActive).toBe(false);
+  });
+});
+
 describe('Game backdrop', () => {
   it('advances backdropTime by dt on every update', () => {
     const game = new Game();
@@ -91,8 +144,7 @@ describe('Game backdrop', () => {
   });
 
   it('keeps advancing after the match ends, without affecting the score', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     for (let i = 0; i < 11; i += 1) {
       game.ballY = 900;
       game.ballVY = 300;
@@ -162,8 +214,7 @@ describe('Game paddle control', () => {
 
 describe('Game ball physics', () => {
   it('starts the ball at the center moving diagonally', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     expect(game.ballX).toBe(200);
     expect(game.ballY).toBe(400);
     expect(game.ballVX).not.toBe(0);
@@ -171,8 +222,7 @@ describe('Game ball physics', () => {
   });
 
   it('bounces off the left wall', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     game.ballX = 2;
     game.ballVX = -300;
     game.update(0.001, 400, 800);
@@ -181,8 +231,7 @@ describe('Game ball physics', () => {
   });
 
   it('bounces off the right wall', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     game.ballX = 398;
     game.ballVX = 300;
     game.update(0.001, 400, 800);
@@ -191,8 +240,7 @@ describe('Game ball physics', () => {
   });
 
   it('reflects off player 1 (top) paddle when moving up into it', () => {
-    const game = new Game();
-    game.update(0, 400, 800); // initialize
+    const game = startGame();
     game.paddle1X = 200;
     game.ballX = 200;
     game.ballY = 60; // just above the top paddle band (margin = 0.06 * 800 = 48)
@@ -205,8 +253,7 @@ describe('Game ball physics', () => {
   });
 
   it('reflects off player 2 (bottom) paddle when moving down into it', () => {
-    const game = new Game();
-    game.update(0, 400, 800); // initialize
+    const game = startGame();
     game.paddle2X = 200;
     game.ballX = 200;
     game.ballY = 730; // just above the bottom paddle band (margin = 0.06 * 800 = 48 from bottom -> y=752)
@@ -219,8 +266,7 @@ describe('Game ball physics', () => {
   });
 
   it('does not reflect off a paddle it misses horizontally', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     game.paddle1X = 50; // far from where the ball is
     game.ballX = 350;
     game.ballY = 55;
@@ -233,8 +279,7 @@ describe('Game ball physics', () => {
   });
 
   it('resets to center when the ball exits past the top edge', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     game.ballX = 200;
     game.ballY = -100;
     game.ballVY = -300;
@@ -246,8 +291,7 @@ describe('Game ball physics', () => {
   });
 
   it('resets to center when the ball exits past the bottom edge', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     game.ballX = 200;
     game.ballY = 900;
     game.ballVY = 300;
@@ -261,8 +305,7 @@ describe('Game ball physics', () => {
 
 describe('Game scoring', () => {
   it('awards a point to the bottom player when the ball exits past the top edge', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     game.ballY = -100;
     game.ballVY = -300;
 
@@ -273,8 +316,7 @@ describe('Game scoring', () => {
   });
 
   it('awards a point to the top player when the ball exits past the bottom edge', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     game.ballY = 900;
     game.ballVY = 300;
 
@@ -285,8 +327,7 @@ describe('Game scoring', () => {
   });
 
   it('parks the ball at the center with zero velocity during the post-point serve delay', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     game.ballY = -100;
     game.ballVY = -300;
 
@@ -299,8 +340,7 @@ describe('Game scoring', () => {
   });
 
   it('re-serves the ball with velocity once the serve delay elapses', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     game.ballY = -100;
     game.ballVY = -300;
     game.update(0.001, 400, 800); // scores the point and starts the serve delay
@@ -311,8 +351,7 @@ describe('Game scoring', () => {
   });
 
   it('declares a winner once a player reaches the winning score', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
 
     for (let i = 0; i < 11; i += 1) {
       game.ballY = 900;
@@ -326,8 +365,7 @@ describe('Game scoring', () => {
   });
 
   it('stops updating the ball once the match is won', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
 
     for (let i = 0; i < 11; i += 1) {
       game.ballY = 900;
@@ -345,8 +383,7 @@ describe('Game scoring', () => {
   });
 
   it('restarts the match with both scores reset when tapping the game-over state', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
 
     for (let i = 0; i < 11; i += 1) {
       game.ballY = 900;
@@ -366,8 +403,7 @@ describe('Game scoring', () => {
 
 describe('Game win celebration', () => {
   it('starts the win celebration timer at zero and advances it once the match is won', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     for (let i = 0; i < 10; i += 1) {
       game.ballY = 900;
       game.ballVY = 300;
@@ -391,8 +427,7 @@ describe('Game win celebration', () => {
   });
 
   it('resets the win celebration timer when the match restarts, without affecting score/winner logic', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     for (let i = 0; i < 11; i += 1) {
       game.ballY = 900;
       game.ballVY = 300;
@@ -420,8 +455,7 @@ describe('Game power-ups', () => {
   });
 
   it('spawns a power-up on the field once the spawn interval elapses during an active rally', () => {
-    const game = new Game();
-    game.update(0, 400, 800); // initializes and serves
+    const game = startGame(); // initializes and serves
     game.ballVX = 0;
     game.ballVY = 0; // freeze the ball so the rally never ends during the wait
 
@@ -433,8 +467,7 @@ describe('Game power-ups', () => {
   });
 
   it('does not spawn a power-up while the ball is off-screen during the post-point serve delay', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     game.ballY = -100;
     game.ballVY = -300;
     game.update(0.001, 400, 800); // scores the point and starts the serve delay
@@ -445,8 +478,7 @@ describe('Game power-ups', () => {
   });
 
   it('does not spawn a second power-up while one is already active', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     game.ballVX = 0;
     game.ballVY = 0;
     game.update(POWER_UP_SPAWN_INTERVAL_SECONDS, 400, 800);
@@ -459,8 +491,7 @@ describe('Game power-ups', () => {
   });
 
   it('activates the Speed Boost effect and removes the icon when the ball collides with it', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     game.lastPaddleTouch = 1;
     game.activePowerUp = { id: 1, kind: 'speed-boost', x: game.ballX, y: game.ballY };
 
@@ -491,8 +522,7 @@ describe('Game power-ups', () => {
   });
 
   it('reverts the Speed Boost automatically once its duration elapses', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     game.lastPaddleTouch = 2;
     game.activePowerUp = { id: 1, kind: 'speed-boost', x: game.ballX, y: game.ballY };
     game.ballVX = 0;
@@ -508,8 +538,7 @@ describe('Game power-ups', () => {
   });
 
   it('leaves the Speed Boost icon uncollected if no paddle has touched the ball yet', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     expect(game.lastPaddleTouch).toBeNull();
     game.activePowerUp = { id: 1, kind: 'speed-boost', x: game.ballX, y: game.ballY };
 
@@ -523,8 +552,7 @@ describe('Game power-ups', () => {
   });
 
   it('lets each paddle keep an independent Speed Boost expiry (issue #25)', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     game.ballVX = 0;
     game.ballVY = 0; // freeze the ball so the rally does not end during the wait
 
@@ -544,8 +572,7 @@ describe('Game power-ups', () => {
   });
 
   it('activates the Fast Ball effect, multiplying the current ball speed, when the ball collides with it', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     game.ballVX = 100;
     game.ballVY = -200;
     game.activePowerUp = { id: 1, kind: 'fast-ball', x: game.ballX, y: game.ballY };
@@ -558,8 +585,7 @@ describe('Game power-ups', () => {
   });
 
   it('keeps the Fast Ball speed boost through a paddle bounce', () => {
-    const game = new Game();
-    game.update(0, 400, 800); // initialize
+    const game = startGame();
     game.ballVX = 100;
     game.ballVY = -200;
     game.activePowerUp = { id: 1, kind: 'fast-ball', x: game.ballX, y: game.ballY };
@@ -578,8 +604,7 @@ describe('Game power-ups', () => {
   });
 
   it('still bounces off a paddle when a stacked Fast Ball speed would otherwise skip past the collision band in one frame', () => {
-    const game = new Game();
-    game.update(0, 400, 800); // initialize
+    const game = startGame();
 
     // Reproduces issue #15: speed reached after ~6 stacked Fast Ball pickups
     // (440 * FAST_BALL_MULTIPLIER^6 =~ 2663.5px/s on an 800px-tall canvas),
@@ -597,8 +622,7 @@ describe('Game power-ups', () => {
   });
 
   it('still bounces off a paddle when a stacked Fast Ball speed would otherwise tunnel through it horizontally', () => {
-    const game = new Game();
-    game.update(0, 400, 800); // initialize
+    const game = startGame();
 
     // Reproduces issue #19: the ball starts dead-center in X on player 1's
     // paddle (band = [131.2, 268.8]) just below its Y band, with enough
@@ -618,8 +642,7 @@ describe('Game power-ups', () => {
   });
 
   it('does not register a paddle bounce when the X and Y bounding ranges overlap the band independently but the actual path passes to the side (issue #21)', () => {
-    const game = new Game();
-    game.update(0, 800, 400); // initialize
+    const game = startGame(800, 400);
 
     // Reproduces issue #21: at extreme stacked-Fast-Ball speed the ball's
     // whole-frame X range and whole-frame Y range each independently overlap
@@ -643,8 +666,7 @@ describe('Game power-ups', () => {
   });
 
   it('still bounces off a paddle when a side-wall bounce and the paddle crossing both happen within the same frame (issue #23)', () => {
-    const game = new Game();
-    game.update(0, 800, 400); // initialize
+    const game = startGame(800, 400);
 
     // Reproduces issue #23: at extreme stacked-Fast-Ball speed the ball
     // crosses the left wall early in the frame (t =~ 0.95ms in), then -- per
@@ -669,8 +691,7 @@ describe('Game power-ups', () => {
   });
 
   it('ignores a power-up the ball has not reached yet', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     game.activePowerUp = { id: 1, kind: 'fast-ball', x: game.ballX + 1000, y: game.ballY + 1000 };
     const vx = game.ballVX;
     const vy = game.ballVY;
@@ -683,8 +704,7 @@ describe('Game power-ups', () => {
   });
 
   it('activates the Giant Paddle effect, widening the collecting paddle, when the ball collides with it', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     game.lastPaddleTouch = 1;
     game.activePowerUp = { id: 1, kind: 'giant-paddle', x: game.ballX, y: game.ballY };
 
@@ -696,8 +716,7 @@ describe('Game power-ups', () => {
   });
 
   it('leaves the Giant Paddle icon uncollected if no paddle has touched the ball yet', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     expect(game.lastPaddleTouch).toBeNull();
     game.activePowerUp = { id: 1, kind: 'giant-paddle', x: game.ballX, y: game.ballY };
 
@@ -711,8 +730,7 @@ describe('Game power-ups', () => {
   });
 
   it('re-clamps a paddle sitting at the edge so it stays fully on-canvas when Giant Paddle activates', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     game.onPointerDown(1, -1000, 50, 400, 800); // drag paddle 1 flush against the left edge
     const halfWidthNormal = 400 * 0.28 * 1 * 0.5;
     expect(game.paddle1X).toBeCloseTo(halfWidthNormal);
@@ -742,8 +760,7 @@ describe('Game power-ups', () => {
   });
 
   it('reverts the Giant Paddle automatically once its duration elapses', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     game.lastPaddleTouch = 2;
     game.activePowerUp = { id: 1, kind: 'giant-paddle', x: game.ballX, y: game.ballY };
     game.ballVX = 0;
@@ -759,8 +776,7 @@ describe('Game power-ups', () => {
   });
 
   it('lets each paddle keep an independent Giant Paddle expiry (issue #25)', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     game.ballVX = 0;
     game.ballVY = 0; // freeze the ball so the rally does not end during the wait
 
@@ -780,8 +796,7 @@ describe('Game power-ups', () => {
   });
 
   it('activates the Multi-Ball effect, putting an extra ball into play, when the ball collides with it', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     game.activePowerUp = { id: 1, kind: 'multi-ball', x: game.ballX, y: game.ballY };
 
     game.update(0, 400, 800);
@@ -792,8 +807,7 @@ describe('Game power-ups', () => {
   });
 
   it('moves the extra ball independently and lets it score a point for whichever side it exits past', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     game.extraBalls.push({ x: 200, y: 900, vx: 0, vy: 300, remaining: MULTI_BALL_DURATION_SECONDS });
     game.ballVX = 0;
     game.ballVY = 0; // freeze the primary ball so only the extra ball scores
@@ -809,8 +823,7 @@ describe('Game power-ups', () => {
   });
 
   it('removes the extra ball once its duration elapses, without affecting the score', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     game.extraBalls.push({ x: 200, y: 400, vx: 0, vy: 0, remaining: MULTI_BALL_DURATION_SECONDS });
     game.ballVX = 0;
     game.ballVY = 0; // freeze the primary ball so it doesn't score during the long wait
@@ -823,8 +836,7 @@ describe('Game power-ups', () => {
   });
 
   it('clears any extra balls once the primary ball ends the rally', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     game.extraBalls.push({ x: 200, y: 400, vx: 0, vy: 0, remaining: MULTI_BALL_DURATION_SECONDS });
     game.ballY = -100;
     game.ballVY = -300;
@@ -837,8 +849,7 @@ describe('Game power-ups', () => {
 
 describe('Game haptic events', () => {
   it('queues a paddle-hit event when the ball bounces off a paddle', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     game.paddle1X = 200;
     game.ballX = 200;
     game.ballY = 60;
@@ -851,8 +862,7 @@ describe('Game haptic events', () => {
   });
 
   it('queues a wall-bounce event when the ball bounces off a side wall', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     game.ballX = 395;
     game.ballY = 400;
     game.ballVX = 300;
@@ -864,8 +874,7 @@ describe('Game haptic events', () => {
   });
 
   it('queues a score event when a point is awarded', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     game.ballY = -100;
     game.ballVY = -300;
 
@@ -875,8 +884,7 @@ describe('Game haptic events', () => {
   });
 
   it('queues a power-up event when a power-up is collected', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     game.lastPaddleTouch = 1;
     game.activePowerUp = { id: 1, kind: 'speed-boost', x: game.ballX, y: game.ballY };
 
@@ -886,8 +894,7 @@ describe('Game haptic events', () => {
   });
 
   it('drains the queue on consumption, leaving it empty until the next event', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     game.ballY = -100;
     game.ballVY = -300;
     game.update(0.001, 400, 800);
@@ -899,8 +906,7 @@ describe('Game haptic events', () => {
 
 describe('Game screen shake', () => {
   it('triggers a screen shake when a power-up is collected', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     game.lastPaddleTouch = 1;
     game.activePowerUp = { id: 1, kind: 'speed-boost', x: game.ballX, y: game.ballY };
 
@@ -910,8 +916,7 @@ describe('Game screen shake', () => {
   });
 
   it('triggers a screen shake on a paddle hit above the base launch speed', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     game.paddle1X = 200;
     game.ballX = 200;
     game.ballY = 60;
@@ -924,8 +929,7 @@ describe('Game screen shake', () => {
   });
 
   it('does not trigger a screen shake on a normal-speed paddle hit', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     game.paddle1X = 200;
     game.ballX = 200;
     game.ballY = 60;
@@ -938,8 +942,7 @@ describe('Game screen shake', () => {
   });
 
   it('decays the shake to zero via dt and never lets it persist', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     game.lastPaddleTouch = 1;
     game.activePowerUp = { id: 1, kind: 'speed-boost', x: game.ballX, y: game.ballY };
     game.ballVX = 0;
@@ -953,8 +956,7 @@ describe('Game screen shake', () => {
   });
 
   it('does not accumulate across overlapping triggers', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     game.lastPaddleTouch = 1;
     game.activePowerUp = { id: 1, kind: 'speed-boost', x: game.ballX, y: game.ballY };
     game.ballVX = 0;
