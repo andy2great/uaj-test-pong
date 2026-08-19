@@ -29,10 +29,26 @@ const POWER_UP_RADIUS_RATIO = 0.03; // fraction of canvas height
 export const SPEED_BOOST_MULTIPLIER = 1.6;
 export const SPEED_BOOST_DURATION_SECONDS = 5;
 export const FAST_BALL_MULTIPLIER = 1.35;
+export const GIANT_PADDLE_MULTIPLIER = 1.8;
+export const GIANT_PADDLE_DURATION_SECONDS = 5;
+export const MULTI_BALL_DURATION_SECONDS = 8;
 
 type PaddleId = 1 | 2;
 
-export type PowerUpKind = 'speed-boost' | 'fast-ball';
+interface Ball {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+}
+
+// A bonus ball spawned by the Multi-Ball power-up. Expires after its duration
+// elapses or as soon as it exits the field, whichever comes first.
+interface ExtraBall extends Ball {
+  remaining: number;
+}
+
+export type PowerUpKind = 'speed-boost' | 'fast-ball' | 'giant-paddle' | 'multi-ball';
 
 export interface PowerUp {
   id: number;
@@ -52,9 +68,18 @@ interface PowerUpDefinition {
 const POWER_UP_DEFINITIONS: PowerUpDefinition[] = [
   { kind: 'speed-boost', activate: (game) => game.activateSpeedBoost() },
   { kind: 'fast-ball', activate: (game) => game.activateFastBall() },
+  { kind: 'giant-paddle', activate: (game) => game.activateGiantPaddle() },
+  { kind: 'multi-ball', activate: (game) => game.activateMultiBall() },
 ];
 
 export const POWER_UP_KINDS: readonly PowerUpKind[] = POWER_UP_DEFINITIONS.map((entry) => entry.kind);
+
+const POWER_UP_VISUALS: Record<PowerUpKind, { color: string; label: string }> = {
+  'speed-boost': { color: '#ffd166', label: 'S' },
+  'fast-ball': { color: '#ff5b7f', label: 'F' },
+  'giant-paddle': { color: '#06d6a0', label: 'G' },
+  'multi-ball': { color: '#a78bfa', label: 'M' },
+};
 
 // Pure so it can be unit tested directly: given where the ball hit a paddle
 // (relative to the paddle's center and width), returns the rebound velocity.
@@ -92,12 +117,18 @@ export class Game {
   paddleSpeedMultiplier1 = 1;
   paddleSpeedMultiplier2 = 1;
   speedBoostRemaining = 0;
+  paddleWidthMultiplier1 = 1;
+  paddleWidthMultiplier2 = 1;
+  giantPaddleRemaining = 0;
+  extraBalls: ExtraBall[] = [];
 
   private initialized = false;
   private serveDelayRemaining = 0;
   private speedBoostPaddle: PaddleId | null = null;
+  private giantPaddlePaddle: PaddleId | null = null;
   private powerUpSpawnTimer = POWER_UP_SPAWN_INTERVAL_SECONDS;
   private nextPowerUpId = 1;
+  private lastHeight = 0;
   private readonly pointerPaddle = new Map<number, PaddleId>();
 
   private ensureInitialized(width: number, height: number): void {
@@ -110,22 +141,29 @@ export class Game {
     this.initialized = true;
   }
 
+  // Angle from vertical, kept between 30 and 60 degrees so the launch is
+  // always visibly diagonal (never near-horizontal or near-vertical).
+  private randomLaunchVelocity(height: number): { vx: number; vy: number } {
+    const speed = height * BALL_SPEED_RATIO;
+    const angleFromVertical = Math.PI / 6 + Math.random() * (Math.PI / 6);
+    const xSign = Math.random() < 0.5 ? -1 : 1;
+    const ySign = Math.random() < 0.5 ? -1 : 1;
+    return {
+      vx: Math.sin(angleFromVertical) * speed * xSign,
+      vy: Math.cos(angleFromVertical) * speed * ySign,
+    };
+  }
+
   // Centers the ball and immediately launches it in a random diagonal direction.
   private serve(width: number, height: number): void {
     this.ballX = width / 2;
     this.ballY = height / 2;
-    const speed = height * BALL_SPEED_RATIO;
-    // Angle from vertical, kept between 30 and 60 degrees so the launch is
-    // always visibly diagonal (never near-horizontal or near-vertical).
-    const angleFromVertical = Math.PI / 6 + Math.random() * (Math.PI / 6);
-    const xSign = Math.random() < 0.5 ? -1 : 1;
-    const ySign = Math.random() < 0.5 ? -1 : 1;
-    this.ballVX = Math.sin(angleFromVertical) * speed * xSign;
-    this.ballVY = Math.cos(angleFromVertical) * speed * ySign;
+    const { vx, vy } = this.randomLaunchVelocity(height);
+    this.ballVX = vx;
+    this.ballVY = vy;
   }
 
-  // Centers the ball with zero velocity and starts the pre-serve pause.
-  private awardPoint(scorer: PaddleId, width: number, height: number): void {
+  private addScore(scorer: PaddleId): void {
     if (scorer === 1) {
       this.score1 += 1;
     } else {
@@ -136,6 +174,11 @@ export class Game {
     } else if (this.score2 >= WINNING_SCORE) {
       this.winner = 2;
     }
+  }
+
+  // Centers the ball with zero velocity and starts the pre-serve pause.
+  private awardPoint(scorer: PaddleId, width: number, height: number): void {
+    this.addScore(scorer);
 
     this.ballX = width / 2;
     this.ballY = height / 2;
@@ -143,6 +186,7 @@ export class Game {
     this.ballVY = 0;
     this.activePowerUp = null;
     this.powerUpSpawnTimer = POWER_UP_SPAWN_INTERVAL_SECONDS;
+    this.extraBalls = [];
     if (this.winner === null) {
       this.serveDelayRemaining = SERVE_DELAY_SECONDS;
     }
@@ -160,6 +204,11 @@ export class Game {
     this.paddleSpeedMultiplier2 = 1;
     this.speedBoostRemaining = 0;
     this.speedBoostPaddle = null;
+    this.paddleWidthMultiplier1 = 1;
+    this.paddleWidthMultiplier2 = 1;
+    this.giantPaddleRemaining = 0;
+    this.giantPaddlePaddle = null;
+    this.extraBalls = [];
     this.serve(width, height);
   }
 
@@ -186,8 +235,13 @@ export class Game {
     this.pointerPaddle.delete(pointerId);
   }
 
+  private paddleWidth(paddle: PaddleId, width: number): number {
+    const multiplier = paddle === 1 ? this.paddleWidthMultiplier1 : this.paddleWidthMultiplier2;
+    return width * PADDLE_WIDTH_RATIO * multiplier;
+  }
+
   private movePaddle(paddle: PaddleId, x: number, width: number): void {
-    const halfWidth = (width * PADDLE_WIDTH_RATIO) / 2;
+    const halfWidth = this.paddleWidth(paddle, width) / 2;
     const clamped = clamp(x, halfWidth, width - halfWidth);
     if (paddle === 1) {
       this.paddle1X = clamped;
@@ -199,7 +253,7 @@ export class Game {
   // Like movePaddle, but rate-limited to PADDLE_MOVE_STEP_RATIO per call so a
   // Speed Boost (which scales the limit) has a visible effect.
   private dragPaddle(paddle: PaddleId, x: number, width: number): void {
-    const halfWidth = (width * PADDLE_WIDTH_RATIO) / 2;
+    const halfWidth = this.paddleWidth(paddle, width) / 2;
     const target = clamp(x, halfWidth, width - halfWidth);
     const current = paddle === 1 ? this.paddle1X : this.paddle2X;
     const multiplier = paddle === 1 ? this.paddleSpeedMultiplier1 : this.paddleSpeedMultiplier2;
@@ -231,6 +285,31 @@ export class Game {
     this.ballVY *= FAST_BALL_MULTIPLIER;
   }
 
+  activateGiantPaddle(): void {
+    const paddle = this.lastPaddleTouch;
+    if (paddle === null) {
+      return;
+    }
+    if (paddle === 1) {
+      this.paddleWidthMultiplier1 = GIANT_PADDLE_MULTIPLIER;
+    } else {
+      this.paddleWidthMultiplier2 = GIANT_PADDLE_MULTIPLIER;
+    }
+    this.giantPaddlePaddle = paddle;
+    this.giantPaddleRemaining = GIANT_PADDLE_DURATION_SECONDS;
+  }
+
+  activateMultiBall(): void {
+    const { vx, vy } = this.randomLaunchVelocity(this.lastHeight);
+    this.extraBalls.push({
+      x: this.ballX,
+      y: this.ballY,
+      vx,
+      vy,
+      remaining: MULTI_BALL_DURATION_SECONDS,
+    });
+  }
+
   private spawnPowerUp(width: number, height: number): void {
     const definition = POWER_UP_DEFINITIONS[Math.floor(Math.random() * POWER_UP_DEFINITIONS.length)];
     const marginX = width * 0.15;
@@ -259,8 +338,64 @@ export class Game {
     definition?.activate(this);
   }
 
+  // Moves a ball, bounces it off the side walls and either paddle, and
+  // reports which paddle (if any) it just reflected off. Shared by the
+  // primary ball and every Multi-Ball bonus ball so their physics never
+  // diverge.
+  private stepBallPhysics(ball: Ball, dt: number, width: number, height: number): PaddleId | null {
+    ball.x += ball.vx * dt;
+    ball.y += ball.vy * dt;
+
+    const radius = height * BALL_RADIUS_RATIO;
+
+    if (ball.x - radius <= 0) {
+      ball.x = radius;
+      ball.vx = Math.abs(ball.vx);
+    } else if (ball.x + radius >= width) {
+      ball.x = width - radius;
+      ball.vx = -Math.abs(ball.vx);
+    }
+
+    const paddle1Width = this.paddleWidth(1, width);
+    const paddle2Width = this.paddleWidth(2, width);
+    const paddleHeight = height * PADDLE_HEIGHT_RATIO;
+    const paddle1Y = height * PADDLE_MARGIN_RATIO;
+    const paddle2Y = height * (1 - PADDLE_MARGIN_RATIO);
+    const speed = height * BALL_SPEED_RATIO;
+
+    const overlapsPaddleX = (paddleX: number, paddleHalfWidth: number): boolean =>
+      ball.x + radius >= paddleX - paddleHalfWidth && ball.x - radius <= paddleX + paddleHalfWidth;
+
+    if (
+      ball.vy < 0 &&
+      ball.y - radius <= paddle1Y + paddleHeight / 2 &&
+      ball.y + radius >= paddle1Y - paddleHeight / 2 &&
+      overlapsPaddleX(this.paddle1X, paddle1Width / 2)
+    ) {
+      ball.y = paddle1Y + paddleHeight / 2 + radius;
+      const { vx, vy } = reflectOffPaddle(ball.x, this.paddle1X, paddle1Width, speed, true);
+      ball.vx = vx;
+      ball.vy = vy;
+      return 1;
+    }
+    if (
+      ball.vy > 0 &&
+      ball.y + radius >= paddle2Y - paddleHeight / 2 &&
+      ball.y - radius <= paddle2Y + paddleHeight / 2 &&
+      overlapsPaddleX(this.paddle2X, paddle2Width / 2)
+    ) {
+      ball.y = paddle2Y - paddleHeight / 2 - radius;
+      const { vx, vy } = reflectOffPaddle(ball.x, this.paddle2X, paddle2Width, speed, false);
+      ball.vx = vx;
+      ball.vy = vy;
+      return 2;
+    }
+    return null;
+  }
+
   update(dt: number, width: number, height: number): void {
     this.ensureInitialized(width, height);
+    this.lastHeight = height;
 
     if (this.speedBoostRemaining > 0) {
       this.speedBoostRemaining = Math.max(0, this.speedBoostRemaining - dt);
@@ -271,6 +406,18 @@ export class Game {
           this.paddleSpeedMultiplier2 = 1;
         }
         this.speedBoostPaddle = null;
+      }
+    }
+
+    if (this.giantPaddleRemaining > 0) {
+      this.giantPaddleRemaining = Math.max(0, this.giantPaddleRemaining - dt);
+      if (this.giantPaddleRemaining === 0 && this.giantPaddlePaddle !== null) {
+        if (this.giantPaddlePaddle === 1) {
+          this.paddleWidthMultiplier1 = 1;
+        } else {
+          this.paddleWidthMultiplier2 = 1;
+        }
+        this.giantPaddlePaddle = null;
       }
     }
 
@@ -286,51 +433,14 @@ export class Game {
       return;
     }
 
-    this.ballX += this.ballVX * dt;
-    this.ballY += this.ballVY * dt;
-
-    const radius = height * BALL_RADIUS_RATIO;
-
-    if (this.ballX - radius <= 0) {
-      this.ballX = radius;
-      this.ballVX = Math.abs(this.ballVX);
-    } else if (this.ballX + radius >= width) {
-      this.ballX = width - radius;
-      this.ballVX = -Math.abs(this.ballVX);
-    }
-
-    const paddleWidth = width * PADDLE_WIDTH_RATIO;
-    const paddleHalfWidth = paddleWidth / 2;
-    const paddleHeight = height * PADDLE_HEIGHT_RATIO;
-    const paddle1Y = height * PADDLE_MARGIN_RATIO;
-    const paddle2Y = height * (1 - PADDLE_MARGIN_RATIO);
-    const speed = height * BALL_SPEED_RATIO;
-
-    const overlapsPaddleX = (paddleX: number): boolean =>
-      this.ballX + radius >= paddleX - paddleHalfWidth && this.ballX - radius <= paddleX + paddleHalfWidth;
-
-    if (
-      this.ballVY < 0 &&
-      this.ballY - radius <= paddle1Y + paddleHeight / 2 &&
-      this.ballY + radius >= paddle1Y - paddleHeight / 2 &&
-      overlapsPaddleX(this.paddle1X)
-    ) {
-      this.ballY = paddle1Y + paddleHeight / 2 + radius;
-      const { vx, vy } = reflectOffPaddle(this.ballX, this.paddle1X, paddleWidth, speed, true);
-      this.ballVX = vx;
-      this.ballVY = vy;
-      this.lastPaddleTouch = 1;
-    } else if (
-      this.ballVY > 0 &&
-      this.ballY + radius >= paddle2Y - paddleHeight / 2 &&
-      this.ballY - radius <= paddle2Y + paddleHeight / 2 &&
-      overlapsPaddleX(this.paddle2X)
-    ) {
-      this.ballY = paddle2Y - paddleHeight / 2 - radius;
-      const { vx, vy } = reflectOffPaddle(this.ballX, this.paddle2X, paddleWidth, speed, false);
-      this.ballVX = vx;
-      this.ballVY = vy;
-      this.lastPaddleTouch = 2;
+    const primaryBall: Ball = { x: this.ballX, y: this.ballY, vx: this.ballVX, vy: this.ballVY };
+    const touched = this.stepBallPhysics(primaryBall, dt, width, height);
+    this.ballX = primaryBall.x;
+    this.ballY = primaryBall.y;
+    this.ballVX = primaryBall.vx;
+    this.ballVY = primaryBall.vy;
+    if (touched !== null) {
+      this.lastPaddleTouch = touched;
     }
 
     this.powerUpSpawnTimer -= dt;
@@ -340,12 +450,35 @@ export class Game {
     }
     this.handlePowerUpCollision(height);
 
+    const radius = height * BALL_RADIUS_RATIO;
     if (this.ballY + radius < 0) {
       // Ball exited past the top edge: bottom player (player 2) scores.
       this.awardPoint(2, width, height);
     } else if (this.ballY - radius > height) {
       // Ball exited past the bottom edge: top player (player 1) scores.
       this.awardPoint(1, width, height);
+    }
+
+    if (this.extraBalls.length > 0) {
+      this.extraBalls = this.extraBalls.filter((ball) => {
+        ball.remaining -= dt;
+        if (ball.remaining <= 0) {
+          return false;
+        }
+        const extraTouched = this.stepBallPhysics(ball, dt, width, height);
+        if (extraTouched !== null) {
+          this.lastPaddleTouch = extraTouched;
+        }
+        if (ball.y + radius < 0) {
+          this.addScore(2);
+          return false;
+        }
+        if (ball.y - radius > height) {
+          this.addScore(1);
+          return false;
+        }
+        return true;
+      });
     }
   }
 
@@ -356,31 +489,36 @@ export class Game {
     ctx.fillStyle = '#0a1128';
     ctx.fillRect(0, 0, width, height);
 
-    const paddleHalfWidth = (width * PADDLE_WIDTH_RATIO) / 2;
+    const paddle1HalfWidth = this.paddleWidth(1, width) / 2;
+    const paddle2HalfWidth = this.paddleWidth(2, width) / 2;
     const paddleHeight = height * PADDLE_HEIGHT_RATIO;
     const paddle1Y = height * PADDLE_MARGIN_RATIO;
     const paddle2Y = height * (1 - PADDLE_MARGIN_RATIO);
 
     ctx.fillStyle = '#e8ecf5';
-    ctx.fillRect(this.paddle1X - paddleHalfWidth, paddle1Y - paddleHeight / 2, paddleHalfWidth * 2, paddleHeight);
-    ctx.fillRect(this.paddle2X - paddleHalfWidth, paddle2Y - paddleHeight / 2, paddleHalfWidth * 2, paddleHeight);
+    ctx.fillRect(this.paddle1X - paddle1HalfWidth, paddle1Y - paddleHeight / 2, paddle1HalfWidth * 2, paddleHeight);
+    ctx.fillRect(this.paddle2X - paddle2HalfWidth, paddle2Y - paddleHeight / 2, paddle2HalfWidth * 2, paddleHeight);
 
-    ctx.beginPath();
-    ctx.arc(this.ballX, this.ballY, height * BALL_RADIUS_RATIO, 0, Math.PI * 2);
+    const ballRadius = height * BALL_RADIUS_RATIO;
     ctx.fillStyle = '#5b8cff';
-    ctx.fill();
+    for (const ball of [{ x: this.ballX, y: this.ballY }, ...this.extraBalls]) {
+      ctx.beginPath();
+      ctx.arc(ball.x, ball.y, ballRadius, 0, Math.PI * 2);
+      ctx.fill();
+    }
 
     if (this.activePowerUp !== null) {
       const powerUpRadius = height * POWER_UP_RADIUS_RATIO;
+      const visual = POWER_UP_VISUALS[this.activePowerUp.kind];
       ctx.beginPath();
       ctx.arc(this.activePowerUp.x, this.activePowerUp.y, powerUpRadius, 0, Math.PI * 2);
-      ctx.fillStyle = this.activePowerUp.kind === 'speed-boost' ? '#ffd166' : '#ff5b7f';
+      ctx.fillStyle = visual.color;
       ctx.fill();
       ctx.fillStyle = '#0a1128';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
       ctx.font = `${Math.round(powerUpRadius * 1.2)}px sans-serif`;
-      ctx.fillText(this.activePowerUp.kind === 'speed-boost' ? 'S' : 'F', this.activePowerUp.x, this.activePowerUp.y);
+      ctx.fillText(visual.label, this.activePowerUp.x, this.activePowerUp.y);
     }
 
     ctx.fillStyle = '#e8ecf5';
