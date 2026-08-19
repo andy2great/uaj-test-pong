@@ -32,6 +32,32 @@ const WINNING_SCORE = 11; // first player to reach this score wins the match
 const SERVE_DELAY_SECONDS = 1; // pause after a point before the ball re-serves
 const MAX_WALL_BOUNCES_PER_FRAME = 8; // safety bound on the per-frame wall-bounce segment walk below
 
+// Type system: one font stack plus a small set of named text roles, so every
+// piece of drawn text (score, win title, subtext, power-up labels) reads as
+// one deliberate system instead of ad-hoc font strings. A tidy monospaced
+// stack was chosen over a generic sans-serif fallback for its digital
+// scoreboard feel, which fits a Pong-style game.
+const TYPE_FONT_STACK = "'Courier New', ui-monospace, 'Cascadia Code', Menlo, Consolas, monospace";
+type TextRole = 'primary' | 'secondary';
+interface TextStyle {
+  weight: number;
+  letterSpacingRatio: number; // letter-spacing, as a fraction of font size
+}
+const TEXT_STYLES: Record<TextRole, TextStyle> = {
+  // Score, win title, power-up labels: bold and tightly tracked so they read
+  // as the focal point of the screen.
+  primary: { weight: 700, letterSpacingRatio: 0.01 },
+  // Subtext/labels: lighter weight and wider tracking, reading as secondary
+  // to primary text.
+  secondary: { weight: 500, letterSpacingRatio: 0.12 },
+};
+function applyTextStyle(ctx: CanvasRenderingContext2D, role: TextRole, sizePx: number): void {
+  const style = TEXT_STYLES[role];
+  const roundedSize = Math.round(sizePx);
+  ctx.font = `${style.weight} ${roundedSize}px ${TYPE_FONT_STACK}`;
+  ctx.letterSpacing = `${(roundedSize * style.letterSpacingRatio).toFixed(2)}px`;
+}
+
 // Ball-wall/ball-paddle impact flashes: purely cosmetic, decay via `dt` and
 // never feed back into collision timing or outcome.
 const IMPACT_DURATION_SECONDS = 0.25;
@@ -1129,7 +1155,7 @@ export class Game {
       ctx.fillStyle = '#0a1128';
       ctx.textAlign = 'center';
       ctx.textBaseline = 'middle';
-      ctx.font = `${Math.round(powerUpRadius * 1.2)}px sans-serif`;
+      applyTextStyle(ctx, 'primary', powerUpRadius * 1.2);
       ctx.fillText(visual.label, this.activePowerUp.x, this.activePowerUp.y);
     }
 
@@ -1139,7 +1165,7 @@ export class Game {
     ctx.textBaseline = 'middle';
     ctx.shadowColor = 'rgba(120, 170, 255, 0.85)';
     ctx.shadowBlur = height * 0.025;
-    ctx.font = `${Math.round(height * 0.05)}px sans-serif`;
+    applyTextStyle(ctx, 'primary', height * 0.05);
     ctx.fillText(String(this.score1), width / 2, height * 0.28);
     ctx.fillText(String(this.score2), width / 2, height * 0.72);
     ctx.restore();
@@ -1164,7 +1190,7 @@ export class Game {
       ctx.globalAlpha = entranceEased;
       ctx.translate(width / 2, height / 2 - height * 0.04);
       ctx.scale(0.6 + 0.4 * entranceEased, 0.6 + 0.4 * entranceEased);
-      ctx.font = `${Math.round(height * 0.045)}px sans-serif`;
+      applyTextStyle(ctx, 'primary', height * 0.045);
       ctx.fillText(`Player ${this.winner} wins`, 0, 0);
       ctx.restore();
 
@@ -1174,7 +1200,7 @@ export class Game {
       ctx.textBaseline = 'middle';
       ctx.shadowColor = 'rgba(120, 170, 255, 0.85)';
       ctx.shadowBlur = height * 0.02;
-      ctx.font = `${Math.round(height * 0.025)}px sans-serif`;
+      applyTextStyle(ctx, 'secondary', height * 0.025);
       ctx.fillText('Tap to play again', width / 2, height / 2 + height * 0.04);
       ctx.restore();
     }
