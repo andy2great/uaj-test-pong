@@ -1,4 +1,19 @@
-import { Game } from './game';
+import { Game, HapticEventKind } from './game';
+
+// Short, distinct vibration patterns per event, in milliseconds. A single
+// number is one pulse; an array alternates vibrate/pause.
+const HAPTIC_PATTERNS: Record<HapticEventKind, number | number[]> = {
+  'paddle-hit': 10,
+  score: [20, 30, 20],
+  'power-up': 15,
+};
+
+function vibrate(kind: HapticEventKind): void {
+  if (typeof navigator.vibrate !== 'function') {
+    return;
+  }
+  navigator.vibrate(HAPTIC_PATTERNS[kind]);
+}
 
 const canvas = document.getElementById('game') as HTMLCanvasElement;
 const ctx = canvas.getContext('2d')!;
@@ -36,6 +51,9 @@ function frame(now: number): void {
   const dt = Math.min((now - last) / 1000, 0.1);
   last = now;
   game.update(dt, window.innerWidth, window.innerHeight);
+  for (const event of game.consumeHapticEvents()) {
+    vibrate(event);
+  }
   game.render(ctx, window.innerWidth, window.innerHeight);
   requestAnimationFrame(frame);
 }

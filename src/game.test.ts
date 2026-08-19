@@ -787,3 +787,52 @@ describe('Game power-ups', () => {
     expect(game.extraBalls).toHaveLength(0);
   });
 });
+
+describe('Game haptic events', () => {
+  it('queues a paddle-hit event when the ball bounces off a paddle', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.paddle1X = 200;
+    game.ballX = 200;
+    game.ballY = 60;
+    game.ballVX = 0;
+    game.ballVY = -300;
+
+    game.update(0.05, 400, 800);
+
+    expect(game.consumeHapticEvents()).toEqual(['paddle-hit']);
+  });
+
+  it('queues a score event when a point is awarded', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.ballY = -100;
+    game.ballVY = -300;
+
+    game.update(0.001, 400, 800);
+
+    expect(game.consumeHapticEvents()).toEqual(['score']);
+  });
+
+  it('queues a power-up event when a power-up is collected', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.lastPaddleTouch = 1;
+    game.activePowerUp = { id: 1, kind: 'speed-boost', x: game.ballX, y: game.ballY };
+
+    game.update(0, 400, 800);
+
+    expect(game.consumeHapticEvents()).toEqual(['power-up']);
+  });
+
+  it('drains the queue on consumption, leaving it empty until the next event', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.ballY = -100;
+    game.ballVY = -300;
+    game.update(0.001, 400, 800);
+
+    expect(game.consumeHapticEvents()).toEqual(['score']);
+    expect(game.consumeHapticEvents()).toEqual([]);
+  });
+});
