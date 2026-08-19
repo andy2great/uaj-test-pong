@@ -15,14 +15,27 @@ window.addEventListener('resize', resize);
 resize();
 
 canvas.addEventListener('pointerdown', (event) => {
-  game.onTap(event.clientX, event.clientY);
+  canvas.setPointerCapture(event.pointerId);
+  game.onPointerDown(event.pointerId, event.clientX, event.clientY, window.innerWidth, window.innerHeight);
+});
+
+canvas.addEventListener('pointermove', (event) => {
+  game.onPointerMove(event.pointerId, event.clientX, window.innerWidth);
+});
+
+canvas.addEventListener('pointerup', (event) => {
+  game.onPointerUp(event.pointerId);
+});
+
+canvas.addEventListener('pointercancel', (event) => {
+  game.onPointerUp(event.pointerId);
 });
 
 let last = performance.now();
 function frame(now: number): void {
   const dt = Math.min((now - last) / 1000, 0.1);
   last = now;
-  game.update(dt);
+  game.update(dt, window.innerWidth, window.innerHeight);
   game.render(ctx, window.innerWidth, window.innerHeight);
   requestAnimationFrame(frame);
 }
