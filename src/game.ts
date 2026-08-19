@@ -161,7 +161,7 @@ interface Impact {
 // Emitted by update() whenever an event `main.ts` may want to react to (e.g.
 // with haptic feedback) occurs. Drained via consumeHapticEvents() so this
 // file never touches the Vibration API or any other DOM global itself.
-export type HapticEventKind = 'paddle-hit' | 'score' | 'power-up';
+export type HapticEventKind = 'paddle-hit' | 'wall-bounce' | 'score' | 'power-up';
 
 export type PowerUpKind = 'speed-boost' | 'fast-ball' | 'giant-paddle' | 'multi-ball';
 
@@ -627,6 +627,7 @@ export class Game {
       ball.vx = -ball.vx;
       remaining *= 1 - wallT;
       this.spawnImpact(segStartX, segStartY, 'wall');
+      this.hapticEvents.push('wall-bounce');
     }
 
     ball.x = segStartX;

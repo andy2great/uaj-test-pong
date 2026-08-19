@@ -803,6 +803,19 @@ describe('Game haptic events', () => {
     expect(game.consumeHapticEvents()).toEqual(['paddle-hit']);
   });
 
+  it('queues a wall-bounce event when the ball bounces off a side wall', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.ballX = 395;
+    game.ballY = 400;
+    game.ballVX = 300;
+    game.ballVY = 0;
+
+    game.update(0.05, 400, 800);
+
+    expect(game.consumeHapticEvents()).toEqual(['wall-bounce']);
+  });
+
   it('queues a score event when a point is awarded', () => {
     const game = new Game();
     game.update(0, 400, 800);
