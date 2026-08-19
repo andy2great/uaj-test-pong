@@ -407,6 +407,20 @@ describe('Game power-ups', () => {
     expect(game.speedBoostRemaining).toBe(0);
   });
 
+  it('leaves the Speed Boost icon uncollected if no paddle has touched the ball yet', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    expect(game.lastPaddleTouch).toBeNull();
+    game.activePowerUp = { id: 1, kind: 'speed-boost', x: game.ballX, y: game.ballY };
+
+    game.update(0, 400, 800);
+
+    expect(game.activePowerUp).not.toBeNull();
+    expect(game.paddleSpeedMultiplier1).toBe(1);
+    expect(game.paddleSpeedMultiplier2).toBe(1);
+    expect(game.speedBoostRemaining).toBe(0);
+  });
+
   it('activates the Fast Ball effect, multiplying the current ball speed, when the ball collides with it', () => {
     const game = new Game();
     game.update(0, 400, 800);
@@ -485,6 +499,20 @@ describe('Game power-ups', () => {
     expect(game.activePowerUp).toBeNull();
     expect(game.paddleWidthMultiplier1).toBe(GIANT_PADDLE_MULTIPLIER);
     expect(game.giantPaddleRemaining).toBe(GIANT_PADDLE_DURATION_SECONDS);
+  });
+
+  it('leaves the Giant Paddle icon uncollected if no paddle has touched the ball yet', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    expect(game.lastPaddleTouch).toBeNull();
+    game.activePowerUp = { id: 1, kind: 'giant-paddle', x: game.ballX, y: game.ballY };
+
+    game.update(0, 400, 800);
+
+    expect(game.activePowerUp).not.toBeNull();
+    expect(game.paddleWidthMultiplier1).toBe(1);
+    expect(game.paddleWidthMultiplier2).toBe(1);
+    expect(game.giantPaddleRemaining).toBe(0);
   });
 
   it('re-clamps a paddle sitting at the edge so it stays fully on-canvas when Giant Paddle activates', () => {
