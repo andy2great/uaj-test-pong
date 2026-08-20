@@ -506,6 +506,65 @@ describe('Game paddle control', () => {
   });
 });
 
+describe('Game single-player AI paddle (#81)', () => {
+  it('leaves paddle 1 touch-controlled in 2-player mode (default)', () => {
+    const game = startGame();
+    expect(game.singlePlayer).toBe(false);
+    game.onPointerDown(1, 250, 50, 400, 800);
+    expect(game.paddle1X).toBe(250);
+  });
+
+  it('moves the AI paddle toward the ball each frame when single-player is active', () => {
+    const game = startGame();
+    game.singlePlayer = true;
+    game.paddle1X = 50;
+    game.ballX = 350;
+    game.ballY = 400; // away from either paddle band, so this frame is pure tracking motion
+
+    game.update(0.016, 400, 800);
+
+    expect(game.paddle1X).toBeGreaterThan(50);
+  });
+
+  it('rate-limits AI movement per frame instead of snapping instantly to the ball', () => {
+    const game = startGame();
+    game.singlePlayer = true;
+    game.paddle1X = 50;
+    game.ballX = 350;
+    game.ballY = 400;
+
+    game.update(0.016, 400, 800);
+
+    const maxStep = 400 * PADDLE_MOVE_STEP_RATIO;
+    expect(game.paddle1X).toBeLessThanOrEqual(50 + maxStep + 1e-9);
+    expect(game.paddle1X).toBeLessThan(350); // beatable: doesn't snap all the way to the ball in one frame
+  });
+
+  it('ignores touch input on the top half while single-player is active', () => {
+    const game = startGame();
+    game.singlePlayer = true;
+    const before = game.paddle1X;
+
+    game.onPointerDown(1, 250, 50, 400, 800);
+    expect(game.paddle1X).toBe(before);
+
+    game.onPointerMove(1, 300, 400);
+    expect(game.paddle1X).toBe(before); // no pointer was ever associated with paddle 1
+  });
+
+  it('does not move paddle 1 automatically when single-player is inactive', () => {
+    const game = startGame();
+    game.paddle1X = 50;
+    game.ballX = 350;
+    game.ballY = 400;
+
+    game.update(0.016, 400, 800);
+
+    expect(game.paddle1X).toBe(50);
+  });
+
+});
+
 describe('Game ball physics', () => {
   it('starts the ball at the center moving diagonally', () => {
     const game = startGame();
@@ -1452,6 +1511,18 @@ describe('Game pause (#70)', () => {
     expect(game.titleScreenActive).toBe(true);
     expect(game.mapSelectActive).toBe(false);
     expect(game.selectedMap).toBeNull();
+  });
+
+  it('resets singlePlayer to false when Quit to Title is tapped (#81)', () => {
+    const game = startGame();
+    game.singlePlayer = true;
+    game.onPointerDown(1, PAUSE_BUTTON_X, PAUSE_BUTTON_Y, 400, 800);
+    game.onPointerUp(1);
+
+    game.onPointerDown(1, RESUME_BUTTON_X, QUIT_BUTTON_Y, 400, 800);
+    game.onPointerUp(1);
+
+    expect(game.singlePlayer).toBe(false);
     expect(game.score1).toBe(0);
     expect(game.score2).toBe(0);
 
