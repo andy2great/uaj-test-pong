@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import {
   FAST_BALL_MULTIPLIER,
+  FREEZE_PADDLE_DURATION_SECONDS,
+  FREEZE_PADDLE_MULTIPLIER,
   Game,
   GIANT_PADDLE_DURATION_SECONDS,
   GIANT_PADDLE_MULTIPLIER,
@@ -8,8 +10,6 @@ import {
   PADDLE_MOVE_STEP_RATIO,
   POWER_UP_KINDS,
   POWER_UP_SPAWN_INTERVAL_SECONDS,
-  SPEED_BOOST_DURATION_SECONDS,
-  SPEED_BOOST_MULTIPLIER,
   clamp,
   eccentricOrbitPosition,
   orbitPosition,
@@ -618,7 +618,7 @@ describe('Game win celebration', () => {
 
 describe('Game power-ups', () => {
   it('registers all four power-ups via the extensible kind registry', () => {
-    expect(POWER_UP_KINDS).toContain('speed-boost');
+    expect(POWER_UP_KINDS).toContain('freeze-paddle');
     expect(POWER_UP_KINDS).toContain('fast-ball');
     expect(POWER_UP_KINDS).toContain('giant-paddle');
     expect(POWER_UP_KINDS).toContain('multi-ball');
@@ -660,39 +660,40 @@ describe('Game power-ups', () => {
     expect(game.activePowerUp).toBe(firstPowerUp);
   });
 
-  it('activates the Speed Boost effect and removes the icon when the ball collides with it', () => {
+  it('activates the Freeze effect on the opponent paddle and removes the icon when the ball collides with it', () => {
     const game = startGame();
-    game.lastPaddleTouch = 1;
-    game.activePowerUp = { id: 1, kind: 'speed-boost', x: game.ballX, y: game.ballY };
+    game.lastPaddleTouch = 1; // paddle 1 hit it last, so paddle 2 gets frozen
+    game.activePowerUp = { id: 1, kind: 'freeze-paddle', x: game.ballX, y: game.ballY };
 
     game.update(0, 400, 800);
 
     expect(game.activePowerUp).toBeNull();
-    expect(game.paddleSpeedMultiplier1).toBe(SPEED_BOOST_MULTIPLIER);
-    expect(game.speedBoostRemaining1).toBe(SPEED_BOOST_DURATION_SECONDS);
+    expect(game.paddleSpeedMultiplier2).toBe(FREEZE_PADDLE_MULTIPLIER);
+    expect(game.freezeRemaining2).toBe(FREEZE_PADDLE_DURATION_SECONDS);
+    expect(game.paddleSpeedMultiplier1).toBe(1);
   });
 
-  it('increases how far a drag can move the boosted paddle in a single move event', () => {
+  it('reduces how far a drag can move the frozen paddle in a single move event', () => {
     const game = startGame();
     game.onPointerDown(1, 200, 50, 400, 800); // registers the pointer as controlling paddle 1
 
     game.paddle1X = 0; // simulate the paddle sitting at the far left edge
     game.onPointerMove(1, 400, 400); // drag toward the far right edge, well beyond the step cap
-    const paddle1XAfterUnboosted = game.paddle1X;
+    const paddle1XAfterNormal = game.paddle1X;
 
     game.paddle1X = 0;
-    game.paddleSpeedMultiplier1 = SPEED_BOOST_MULTIPLIER;
+    game.paddleSpeedMultiplier1 = FREEZE_PADDLE_MULTIPLIER;
     game.onPointerMove(1, 400, 400);
-    const paddle1XAfterBoosted = game.paddle1X;
+    const paddle1XAfterFrozen = game.paddle1X;
 
-    expect(paddle1XAfterUnboosted).toBeCloseTo(400 * PADDLE_MOVE_STEP_RATIO);
-    expect(paddle1XAfterBoosted).toBeCloseTo(400 * PADDLE_MOVE_STEP_RATIO * SPEED_BOOST_MULTIPLIER);
-    expect(paddle1XAfterBoosted).toBeGreaterThan(paddle1XAfterUnboosted);
+    expect(paddle1XAfterNormal).toBeCloseTo(400 * PADDLE_MOVE_STEP_RATIO);
+    expect(paddle1XAfterFrozen).toBeCloseTo(400 * PADDLE_MOVE_STEP_RATIO * FREEZE_PADDLE_MULTIPLIER);
+    expect(paddle1XAfterFrozen).toBeLessThan(paddle1XAfterNormal);
   });
 
   it('caps a single drag event to a small enough step that a full-width flick spans several pointermove events', () => {
     // Regression test for #53: PADDLE_MOVE_STEP_RATIO must be low enough to
-    // actually bind during a real drag, otherwise the Speed Boost multiplier
+    // actually bind during a real drag, otherwise the Freeze multiplier
     // scales a cap that was never the bottleneck and has no visible effect.
     const game = startGame();
     game.onPointerDown(1, 200, 50, 400, 800);
@@ -702,7 +703,7 @@ describe('Game power-ups', () => {
     expect(game.paddle1X).toBeLessThan(400 * 0.2); // far from snapping instantly to the target
   });
 
-  it('lets a boosted paddle cross the canvas in noticeably fewer drag events than baseline', () => {
+  it('takes a frozen paddle noticeably more drag events to cross the canvas than baseline', () => {
     const game = startGame();
     game.onPointerDown(1, 200, 50, 400, 800);
 
@@ -721,12 +722,12 @@ describe('Game power-ups', () => {
       return events;
     };
 
-    const unboostedEvents = eventsToCross(1);
-    const boostedEvents = eventsToCross(SPEED_BOOST_MULTIPLIER);
+    const normalEvents = eventsToCross(1);
+    const frozenEvents = eventsToCross(FREEZE_PADDLE_MULTIPLIER);
 
     // With a non-binding cap this gap is only a single event (imperceptible);
     // a real fix must make the difference clearly perceptible during play.
-    expect(unboostedEvents - boostedEvents).toBeGreaterThanOrEqual(3);
+    expect(frozenEvents - normalEvents).toBeGreaterThanOrEqual(3);
   });
 
   it('does not clamp small, normal-speed drag deltas, so baseline dragging still tracks the finger 1:1', () => {
@@ -737,51 +738,51 @@ describe('Game power-ups', () => {
     expect(game.paddle1X).toBe(210);
   });
 
-  it('reverts the Speed Boost automatically once its duration elapses', () => {
+  it('reverts the Freeze effect automatically once its duration elapses', () => {
     const game = startGame();
-    game.lastPaddleTouch = 2;
-    game.activePowerUp = { id: 1, kind: 'speed-boost', x: game.ballX, y: game.ballY };
+    game.lastPaddleTouch = 2; // paddle 2 hit it last, so paddle 1 gets frozen
+    game.activePowerUp = { id: 1, kind: 'freeze-paddle', x: game.ballX, y: game.ballY };
     game.ballVX = 0;
     game.ballVY = 0; // freeze the ball so the rally does not end during the wait
 
-    game.update(0, 400, 800); // activates the boost
-    expect(game.paddleSpeedMultiplier2).toBe(SPEED_BOOST_MULTIPLIER);
+    game.update(0, 400, 800); // activates the freeze
+    expect(game.paddleSpeedMultiplier1).toBe(FREEZE_PADDLE_MULTIPLIER);
 
-    game.update(SPEED_BOOST_DURATION_SECONDS, 400, 800);
+    game.update(FREEZE_PADDLE_DURATION_SECONDS, 400, 800);
 
-    expect(game.paddleSpeedMultiplier2).toBe(1);
-    expect(game.speedBoostRemaining2).toBe(0);
+    expect(game.paddleSpeedMultiplier1).toBe(1);
+    expect(game.freezeRemaining1).toBe(0);
   });
 
-  it('leaves the Speed Boost icon uncollected if no paddle has touched the ball yet', () => {
+  it('leaves the Freeze icon uncollected if no paddle has touched the ball yet', () => {
     const game = startGame();
     expect(game.lastPaddleTouch).toBeNull();
-    game.activePowerUp = { id: 1, kind: 'speed-boost', x: game.ballX, y: game.ballY };
+    game.activePowerUp = { id: 1, kind: 'freeze-paddle', x: game.ballX, y: game.ballY };
 
     game.update(0, 400, 800);
 
     expect(game.activePowerUp).not.toBeNull();
     expect(game.paddleSpeedMultiplier1).toBe(1);
     expect(game.paddleSpeedMultiplier2).toBe(1);
-    expect(game.speedBoostRemaining1).toBe(0);
-    expect(game.speedBoostRemaining2).toBe(0);
+    expect(game.freezeRemaining1).toBe(0);
+    expect(game.freezeRemaining2).toBe(0);
   });
 
-  it('lets each paddle keep an independent Speed Boost expiry (issue #25)', () => {
+  it('lets each paddle keep an independent Freeze expiry (issue #25)', () => {
     const game = startGame();
     game.ballVX = 0;
     game.ballVY = 0; // freeze the ball so the rally does not end during the wait
 
-    game.lastPaddleTouch = 1;
-    game.activateSpeedBoost();
-    expect(game.paddleSpeedMultiplier1).toBe(SPEED_BOOST_MULTIPLIER);
+    game.lastPaddleTouch = 1; // freezes paddle 2
+    game.activateFreezePaddle();
+    expect(game.paddleSpeedMultiplier2).toBe(FREEZE_PADDLE_MULTIPLIER);
 
-    game.update(2, 400, 800); // 2s into paddle 1's 5s boost
-    game.lastPaddleTouch = 2;
-    game.activateSpeedBoost();
-    expect(game.paddleSpeedMultiplier2).toBe(SPEED_BOOST_MULTIPLIER);
+    game.update(2, 400, 800); // 2s into paddle 2's 4s freeze
+    game.lastPaddleTouch = 2; // freezes paddle 1
+    game.activateFreezePaddle();
+    expect(game.paddleSpeedMultiplier1).toBe(FREEZE_PADDLE_MULTIPLIER);
 
-    game.update(6, 400, 800); // well past both paddles' 5s windows
+    game.update(5, 400, 800); // well past both paddles' 4s windows
 
     expect(game.paddleSpeedMultiplier1).toBe(1);
     expect(game.paddleSpeedMultiplier2).toBe(1);
@@ -1101,7 +1102,7 @@ describe('Game haptic events', () => {
   it('queues a power-up event when a power-up is collected', () => {
     const game = startGame();
     game.lastPaddleTouch = 1;
-    game.activePowerUp = { id: 1, kind: 'speed-boost', x: game.ballX, y: game.ballY };
+    game.activePowerUp = { id: 1, kind: 'freeze-paddle', x: game.ballX, y: game.ballY };
 
     game.update(0, 400, 800);
 
@@ -1123,7 +1124,7 @@ describe('Game screen shake', () => {
   it('triggers a screen shake when a power-up is collected', () => {
     const game = startGame();
     game.lastPaddleTouch = 1;
-    game.activePowerUp = { id: 1, kind: 'speed-boost', x: game.ballX, y: game.ballY };
+    game.activePowerUp = { id: 1, kind: 'freeze-paddle', x: game.ballX, y: game.ballY };
 
     game.update(0, 400, 800);
 
@@ -1159,7 +1160,7 @@ describe('Game screen shake', () => {
   it('decays the shake to zero via dt and never lets it persist', () => {
     const game = startGame();
     game.lastPaddleTouch = 1;
-    game.activePowerUp = { id: 1, kind: 'speed-boost', x: game.ballX, y: game.ballY };
+    game.activePowerUp = { id: 1, kind: 'freeze-paddle', x: game.ballX, y: game.ballY };
     game.ballVX = 0;
     game.ballVY = 0; // freeze the ball so the rally does not end during the wait
     game.update(0, 400, 800); // triggers the shake
@@ -1173,7 +1174,7 @@ describe('Game screen shake', () => {
   it('does not accumulate across overlapping triggers', () => {
     const game = startGame();
     game.lastPaddleTouch = 1;
-    game.activePowerUp = { id: 1, kind: 'speed-boost', x: game.ballX, y: game.ballY };
+    game.activePowerUp = { id: 1, kind: 'freeze-paddle', x: game.ballX, y: game.ballY };
     game.ballVX = 0;
     game.ballVY = 0; // freeze the ball so the rally does not end during the wait
     game.update(0, 400, 800); // first trigger
