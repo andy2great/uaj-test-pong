@@ -2012,6 +2012,19 @@ export class Game {
     ctx.restore();
   }
 
+  // Strokes a rounded-rect border inset by half the line width, so the
+  // outer edge of the drawn stroke lands exactly on `rect` instead of
+  // bleeding past it (canvas centers strokes on the path by default). Used
+  // by every tappable button so its visible bounds never exceed the AABB
+  // used for hit-testing (issue #78).
+  private strokeInsetRoundRect(ctx: CanvasRenderingContext2D, rect: Rect, radius: number, lineWidth: number): void {
+    const inset = lineWidth / 2;
+    ctx.lineWidth = lineWidth;
+    ctx.beginPath();
+    ctx.roundRect(rect.x + inset, rect.y + inset, rect.w - lineWidth, rect.h - lineWidth, Math.max(0, radius - inset));
+    ctx.stroke();
+  }
+
   // Draws one map-select button as a themed card -- gradient fill, glowing
   // border, and a small planet swatch that hints at the map -- replacing the
   // flat filled rectangle + plain label from the original map-select screen
@@ -2041,8 +2054,7 @@ export class Game {
     ctx.shadowColor = `rgba(${theme.starGlowRgb}, 0.45)`;
     ctx.shadowBlur = rect.h * 0.3;
     ctx.strokeStyle = 'rgba(232, 236, 245, 0.4)';
-    ctx.lineWidth = Math.max(1, rect.h * 0.035);
-    ctx.stroke();
+    this.strokeInsetRoundRect(ctx, rect, radius, Math.max(1, rect.h * 0.035));
     ctx.restore();
 
     const iconRadius = rect.h * MAP_CARD_ICON_RADIUS_RATIO;
@@ -2137,8 +2149,7 @@ export class Game {
     ctx.fillStyle = pressed ? 'rgba(10, 17, 40, 0.8)' : 'rgba(10, 17, 40, 0.55)';
     ctx.fill();
     ctx.strokeStyle = 'rgba(232, 236, 245, 0.4)';
-    ctx.lineWidth = Math.max(1, rect.h * 0.04);
-    ctx.stroke();
+    this.strokeInsetRoundRect(ctx, rect, radius, Math.max(1, rect.h * 0.04));
     ctx.restore();
 
     const barWidth = rect.w * 0.12;
@@ -2171,8 +2182,7 @@ export class Game {
     ctx.fill();
     ctx.globalAlpha = 1;
     ctx.strokeStyle = 'rgba(232, 236, 245, 0.4)';
-    ctx.lineWidth = Math.max(1, rect.h * 0.035);
-    ctx.stroke();
+    this.strokeInsetRoundRect(ctx, rect, radius, Math.max(1, rect.h * 0.035));
     ctx.restore();
 
     ctx.save();

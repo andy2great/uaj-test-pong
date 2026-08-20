@@ -1588,3 +1588,161 @@ describe('Game menu button press feedback (#77)', () => {
     expect(game.paused).toBe(true);
   });
 });
+
+describe('Menu button tap areas cover their full visible bounds (#78)', () => {
+  // Every button rect below is read straight off the *Rect helpers in
+  // game.ts (mapButtonRect, pauseOverlayButtonRect, pauseSettingsButtonRect,
+  // pauseButtonRect) at the 400x800 canvas size used throughout this test
+  // suite, so these coordinates are exactly the AABB shared by hit-testing
+  // and rendering -- not approximations. Each button is tapped (down, then
+  // up, per #77's press/commit model) at all four corners plus the
+  // midpoints of its four edges, not just its center.
+  function corners(rect: { x: number; y: number; w: number; h: number }): [number, number][] {
+    const { x, y, w, h } = rect;
+    return [
+      [x, y], // top-left
+      [x + w, y], // top-right
+      [x, y + h], // bottom-left
+      [x + w, y + h], // bottom-right
+      [x + w / 2, y], // top-mid
+      [x + w / 2, y + h], // bottom-mid
+      [x, y + h / 2], // left-mid
+      [x + w, y + h / 2], // right-mid
+    ];
+  }
+
+  function tap(game: Game, x: number, y: number): void {
+    game.onPointerDown(1, x, y, 400, 800);
+    game.onPointerUp(1);
+  }
+
+  describe('map-select cards', () => {
+    const EARTH_RECT = { x: 80, y: 304, w: 240, h: 80 };
+    const MARS_RECT = { x: 80, y: 416, w: 240, h: 80 };
+
+    it.each(corners(EARTH_RECT))('selects Earth when tapped at (%i, %i)', (x, y) => {
+      const game = new Game();
+      game.update(0, 400, 800);
+      tap(game, 200, 400); // dismiss the title screen
+
+      tap(game, x, y);
+
+      expect(game.selectedMap).toBe('earth');
+    });
+
+    it.each(corners(MARS_RECT))('selects Mars when tapped at (%i, %i)', (x, y) => {
+      const game = new Game();
+      game.update(0, 400, 800);
+      tap(game, 200, 400); // dismiss the title screen
+
+      tap(game, x, y);
+
+      expect(game.selectedMap).toBe('mars');
+    });
+  });
+
+  describe('pause-overlay buttons', () => {
+    const PAUSE_BUTTON_X = 352;
+    const PAUSE_BUTTON_Y = 48;
+    const RESUME_RECT = { x: 76, y: 206, w: 248, h: 68 };
+    const MAP_RECT = { x: 76, y: 298, w: 248, h: 68 };
+    const SETTINGS_RECT = { x: 76, y: 390, w: 248, h: 68 };
+    const RESTART_RECT = { x: 76, y: 482, w: 248, h: 68 };
+    const QUIT_RECT = { x: 76, y: 574, w: 248, h: 68 };
+
+    function pause(game: Game): void {
+      tap(game, PAUSE_BUTTON_X, PAUSE_BUTTON_Y);
+    }
+
+    it.each(corners(RESUME_RECT))('resumes when Resume is tapped at (%i, %i)', (x, y) => {
+      const game = startGame();
+      pause(game);
+
+      tap(game, x, y);
+
+      expect(game.paused).toBe(false);
+    });
+
+    it.each(corners(MAP_RECT))('opens Change Map when tapped at (%i, %i)', (x, y) => {
+      const game = startGame();
+      pause(game);
+
+      tap(game, x, y);
+
+      expect(game.pauseMapSelectActive).toBe(true);
+    });
+
+    it.each(corners(SETTINGS_RECT))('opens Settings when tapped at (%i, %i)', (x, y) => {
+      const game = startGame();
+      pause(game);
+
+      tap(game, x, y);
+
+      expect(game.pauseSettingsActive).toBe(true);
+    });
+
+    it.each(corners(RESTART_RECT))('restarts the match when Restart Match is tapped at (%i, %i)', (x, y) => {
+      const game = startGame();
+      game.score1 = 3;
+      pause(game);
+
+      tap(game, x, y);
+
+      expect(game.paused).toBe(false);
+      expect(game.score1).toBe(0);
+    });
+
+    it.each(corners(QUIT_RECT))('returns to the title screen when Quit to Title is tapped at (%i, %i)', (x, y) => {
+      const game = startGame();
+      pause(game);
+
+      tap(game, x, y);
+
+      expect(game.titleScreenActive).toBe(true);
+    });
+  });
+
+  describe('pause-settings buttons', () => {
+    const PAUSE_BUTTON_X = 352;
+    const PAUSE_BUTTON_Y = 48;
+    const SETTINGS_BUTTON_Y = 424;
+    const SOUND_TOGGLE_RECT = { x: 76, y: 344, w: 248, h: 68 };
+    const BACK_RECT = { x: 76, y: 436, w: 248, h: 68 };
+
+    function openSettings(game: Game): void {
+      tap(game, PAUSE_BUTTON_X, PAUSE_BUTTON_Y);
+      tap(game, 200, SETTINGS_BUTTON_Y);
+    }
+
+    it.each(corners(SOUND_TOGGLE_RECT))('toggles sound when tapped at (%i, %i)', (x, y) => {
+      const game = startGame();
+      openSettings(game);
+
+      tap(game, x, y);
+
+      expect(game.soundEnabled).toBe(false);
+    });
+
+    it.each(corners(BACK_RECT))('returns to the pause overlay when Back is tapped at (%i, %i)', (x, y) => {
+      const game = startGame();
+      openSettings(game);
+
+      tap(game, x, y);
+
+      expect(game.pauseSettingsActive).toBe(false);
+      expect(game.paused).toBe(true);
+    });
+  });
+
+  describe('the in-match pause icon button', () => {
+    const PAUSE_RECT = { x: 324, y: 20, w: 56, h: 56 };
+
+    it.each(corners(PAUSE_RECT))('pauses the match when tapped at (%i, %i)', (x, y) => {
+      const game = startGame();
+
+      tap(game, x, y);
+
+      expect(game.paused).toBe(true);
+    });
+  });
+});
