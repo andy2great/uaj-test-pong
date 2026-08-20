@@ -1002,11 +1002,28 @@ export class Game {
     const definition = POWER_UP_DEFINITIONS[Math.floor(Math.random() * POWER_UP_DEFINITIONS.length)];
     const marginX = width * 0.15;
     const marginY = height * (PADDLE_MARGIN_RATIO + 0.1);
+    const collisionRadius = height * BALL_RADIUS_RATIO + height * POWER_UP_RADIUS_RATIO;
+    // Re-roll a spawn point that would land on top of the ball's current
+    // position: an icon spawning already inside collision range would be
+    // consumed before ever appearing, defeating the point of it being a
+    // collectible. A few retries are enough since the ball only rules out a
+    // small fraction of the spawn area.
+    let x: number;
+    let y: number;
+    let attempts = 0;
+    do {
+      x = marginX + Math.random() * (width - marginX * 2);
+      y = marginY + Math.random() * (height - marginY * 2);
+      attempts += 1;
+    } while (
+      attempts < 10 &&
+      (x - this.ballX) * (x - this.ballX) + (y - this.ballY) * (y - this.ballY) < collisionRadius * collisionRadius
+    );
     this.activePowerUp = {
       id: this.nextPowerUpId++,
       kind: definition.kind,
-      x: marginX + Math.random() * (width - marginX * 2),
-      y: marginY + Math.random() * (height - marginY * 2),
+      x,
+      y,
     };
   }
 
