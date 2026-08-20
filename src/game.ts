@@ -342,6 +342,30 @@ const MAP_BUTTON_WIDTH_RATIO = 0.6; // fraction of canvas width
 const MAP_BUTTON_HEIGHT_RATIO = 0.1; // fraction of canvas height
 const MAP_BUTTON_GAP_RATIO = 0.04; // fraction of canvas height, between buttons
 
+// Pause button (#70): a small tappable icon shown only during an active
+// match (never on title/map-select/win screens), sized as a comfortable
+// one-thumb tap target and tucked in the top-right corner, clear of the HUD
+// score panels.
+const PAUSE_BUTTON_SIZE_RATIO = 0.07; // fraction of canvas height
+const PAUSE_BUTTON_MARGIN_RATIO = 0.025; // distance from the top/right edge, fraction of canvas height
+
+// Pause overlay (#70): three stacked, thumb-reachable action buttons --
+// Resume, Restart Match, Quit to Title -- styled like the map-select cards
+// so the overlay reads as the same designed menu system (issue #67).
+const PAUSE_OVERLAY_BUTTON_WIDTH_RATIO = 0.62; // fraction of canvas width
+const PAUSE_OVERLAY_BUTTON_HEIGHT_RATIO = 0.085; // fraction of canvas height
+const PAUSE_OVERLAY_BUTTON_GAP_RATIO = 0.03; // fraction of canvas height, between buttons
+const PAUSE_OVERLAY_HEADING_GAP_RATIO = 0.06; // gap between the "Paused" heading and the first button, fraction of canvas height
+const PAUSE_OVERLAY_PANEL_TOP_PADDING_RATIO = 0.05; // fraction of canvas height, above the heading
+const PAUSE_OVERLAY_PANEL_BOTTOM_PADDING_RATIO = 0.05; // fraction of canvas height, below the last button
+
+type PauseAction = 'resume' | 'restart' | 'quit';
+const PAUSE_ACTIONS: { action: PauseAction; label: string }[] = [
+  { action: 'resume', label: 'Resume' },
+  { action: 'restart', label: 'Restart Match' },
+  { action: 'quit', label: 'Quit to Title' },
+];
+
 // Shared menu identity: the title and map-select screens both draw inside a
 // bordered, vignetted panel topped by the same orbiting-icon flourish, so
 // they read as one designed system instead of two disconnected overlays
@@ -539,6 +563,7 @@ export class Game {
   titleScreenActive = true; // shown once on first load, dismissed by the first tap
   mapSelectActive = false; // shown right after the title screen, dismissed by picking a map
   selectedMap: MapId | null = null; // null until a map is picked; persists across restartMatch
+  paused = false; // true while the pause overlay (#70) is up; freezes ball/paddle/power-up updates
 
   activePowerUp: PowerUp | null = null;
   lastPaddleTouch: PaddleId | null = null; // paddle that most recently hit the ball this rally
@@ -630,7 +655,10 @@ export class Game {
     }
   }
 
-  private restartMatch(width: number, height: number): void {
+  // Shared by restartMatch and quitToTitle: resets score/ball/power-up/buff
+  // state, stopping short of either re-serving or touching the title/map
+  // screens so each caller can pick what happens next.
+  private resetMatchState(): void {
     this.score1 = 0;
     this.score2 = 0;
     this.winner = null;
@@ -651,7 +679,21 @@ export class Game {
     this.screenShakeRemaining = 0;
     this.hapticEvents = [];
     this.winCelebrationElapsed = 0;
+  }
+
+  private restartMatch(width: number, height: number): void {
+    this.resetMatchState();
     this.serve(width, height);
+  }
+
+  // Quit to Title (#70): resets the match and returns to the title screen,
+  // clearing selectedMap so the player re-picks a map before the next match
+  // -- consistent with selectedMap's existing null-until-picked behavior.
+  private quitToTitle(): void {
+    this.resetMatchState();
+    this.selectedMap = null;
+    this.titleScreenActive = true;
+    this.mapSelectActive = false;
   }
 
   private spawnImpact(x: number, y: number, kind: ImpactKind): void {
@@ -702,6 +744,53 @@ export class Game {
     return null;
   }
 
+  // True only during an active match (never on the title, map-select, or
+  // win screens) -- shared by the pause button's visibility/hit-test and its
+  // render.
+  private isMatchActive(): boolean {
+    return !this.titleScreenActive && !this.mapSelectActive && this.winner === null;
+  }
+
+  private pauseButtonRect(width: number, height: number): { x: number; y: number; w: number; h: number } {
+    const size = height * PAUSE_BUTTON_SIZE_RATIO;
+    const margin = height * PAUSE_BUTTON_MARGIN_RATIO;
+    return { x: width - margin - size, y: margin, w: size, h: size };
+  }
+
+  private pauseButtonAt(x: number, y: number, width: number, height: number): boolean {
+    if (!this.isMatchActive()) {
+      return false;
+    }
+    const rect = this.pauseButtonRect(width, height);
+    return x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h;
+  }
+
+  // Bounding box of the index-th pause-overlay action button (0 = Resume, in
+  // PAUSE_ACTIONS order), shared by hit-testing and rendering.
+  private pauseOverlayButtonRect(index: number, width: number, height: number): { x: number; y: number; w: number; h: number } {
+    const count = PAUSE_ACTIONS.length;
+    const w = width * PAUSE_OVERLAY_BUTTON_WIDTH_RATIO;
+    const h = height * PAUSE_OVERLAY_BUTTON_HEIGHT_RATIO;
+    const gap = height * PAUSE_OVERLAY_BUTTON_GAP_RATIO;
+    const totalHeight = h * count + gap * (count - 1);
+    const x = (width - w) / 2;
+    const startY = height / 2 - totalHeight / 2 + height * PAUSE_OVERLAY_HEADING_GAP_RATIO * 0.5;
+    const y = startY + index * (h + gap);
+    return { x, y, w, h };
+  }
+
+  // Returns the pause-overlay action tapped at (x, y), or null when the tap
+  // missed every button.
+  private pauseActionAt(x: number, y: number, width: number, height: number): PauseAction | null {
+    for (let i = 0; i < PAUSE_ACTIONS.length; i += 1) {
+      const rect = this.pauseOverlayButtonRect(i, width, height);
+      if (x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h) {
+        return PAUSE_ACTIONS[i].action;
+      }
+    }
+    return null;
+  }
+
   onPointerDown(pointerId: number, x: number, y: number, width: number, height: number): void {
     this.ensureInitialized(width, height);
     if (this.titleScreenActive) {
@@ -717,8 +806,26 @@ export class Game {
         this.serveDelayRemaining = SERVE_DELAY_SECONDS;
       }
       return;
-    } else if (this.winner !== null) {
+    }
+    if (this.paused) {
+      const action = this.pauseActionAt(x, y, width, height);
+      if (action === 'resume') {
+        this.paused = false;
+      } else if (action === 'restart') {
+        this.paused = false;
+        this.restartMatch(width, height);
+      } else if (action === 'quit') {
+        this.paused = false;
+        this.quitToTitle();
+      }
+      return;
+    }
+    if (this.winner !== null) {
       this.restartMatch(width, height);
+      return;
+    }
+    if (this.pauseButtonAt(x, y, width, height)) {
+      this.paused = true;
       return;
     }
     const paddle: PaddleId = y < height / 2 ? 1 : 2;
@@ -727,6 +834,9 @@ export class Game {
   }
 
   onPointerMove(pointerId: number, x: number, width: number): void {
+    if (this.paused) {
+      return;
+    }
     const paddle = this.pointerPaddle.get(pointerId);
     if (paddle === undefined) {
       return;
@@ -978,7 +1088,7 @@ export class Game {
     this.lastWidth = width;
     this.backdropTime += dt;
 
-    if (this.titleScreenActive || this.mapSelectActive) {
+    if (this.titleScreenActive || this.mapSelectActive || this.paused) {
       return;
     }
 
@@ -1806,6 +1916,95 @@ export class Game {
     ctx.restore();
   }
 
+  // Draws the pause button: a rounded translucent icon showing two vertical
+  // bars, tucked in the top-right corner. Purely visual -- hit-testing lives
+  // in pauseButtonAt/pauseButtonRect above so they can never drift apart.
+  private renderPauseButton(ctx: CanvasRenderingContext2D, width: number, height: number): void {
+    const rect = this.pauseButtonRect(width, height);
+    const centerX = rect.x + rect.w / 2;
+    const centerY = rect.y + rect.h / 2;
+    const radius = rect.h * 0.28;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, radius);
+    ctx.fillStyle = 'rgba(10, 17, 40, 0.55)';
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(232, 236, 245, 0.4)';
+    ctx.lineWidth = Math.max(1, rect.h * 0.04);
+    ctx.stroke();
+    ctx.restore();
+
+    const barWidth = rect.w * 0.12;
+    const barHeight = rect.h * 0.42;
+    const barGap = rect.w * 0.14;
+    ctx.fillStyle = '#e8ecf5';
+    ctx.fillRect(centerX - barGap / 2 - barWidth, centerY - barHeight / 2, barWidth, barHeight);
+    ctx.fillRect(centerX + barGap / 2, centerY - barHeight / 2, barWidth, barHeight);
+  }
+
+  // Draws one pause-overlay action button as a themed card -- gradient fill
+  // plus glowing border, matching renderMapCard's treatment -- with a plain
+  // centered label instead of a map icon.
+  private renderPauseActionButton(ctx: CanvasRenderingContext2D, label: string, rect: { x: number; y: number; w: number; h: number }): void {
+    const centerX = rect.x + rect.w / 2;
+    const centerY = rect.y + rect.h / 2;
+    const radius = rect.h * 0.25;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, radius);
+    const fill = ctx.createLinearGradient(rect.x, rect.y, rect.x, rect.y + rect.h);
+    fill.addColorStop(0, 'rgba(232, 236, 245, 0.14)');
+    fill.addColorStop(1, 'rgba(10, 17, 40, 0.92)');
+    ctx.fillStyle = fill;
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(232, 236, 245, 0.4)';
+    ctx.lineWidth = Math.max(1, rect.h * 0.035);
+    ctx.stroke();
+    ctx.restore();
+
+    ctx.save();
+    ctx.fillStyle = '#e8ecf5';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    applyTextStyle(ctx, 'primary', rect.h * 0.3);
+    ctx.fillText(label, centerX, centerY);
+    ctx.restore();
+  }
+
+  // Draws the full-screen pause overlay: a dark scrim, the "Paused" heading
+  // inside a menu panel (matching the title/map-select treatment), and the
+  // three action buttons.
+  private renderPauseOverlay(ctx: CanvasRenderingContext2D, width: number, height: number): void {
+    ctx.fillStyle = 'rgba(10, 17, 40, 0.85)';
+    ctx.fillRect(0, 0, width, height);
+
+    const firstRect = this.pauseOverlayButtonRect(0, width, height);
+    const lastRect = this.pauseOverlayButtonRect(PAUSE_ACTIONS.length - 1, width, height);
+    const headingY = firstRect.y - height * PAUSE_OVERLAY_HEADING_GAP_RATIO;
+    const panelWidth = width * MENU_PANEL_WIDTH_RATIO;
+    const panelTop = headingY - height * PAUSE_OVERLAY_PANEL_TOP_PADDING_RATIO;
+    const panelBottom = lastRect.y + lastRect.h + height * PAUSE_OVERLAY_PANEL_BOTTOM_PADDING_RATIO;
+    const panelHeight = panelBottom - panelTop;
+    this.renderMenuPanel(ctx, width / 2, panelTop + panelHeight / 2, panelWidth, panelHeight);
+
+    ctx.save();
+    ctx.fillStyle = '#e8ecf5';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(120, 170, 255, 0.85)';
+    ctx.shadowBlur = height * 0.02;
+    applyTextStyle(ctx, 'primary', height * 0.045);
+    ctx.fillText('Paused', width / 2, headingY);
+    ctx.restore();
+
+    PAUSE_ACTIONS.forEach((entry, i) => {
+      const rect = this.pauseOverlayButtonRect(i, width, height);
+      this.renderPauseActionButton(ctx, entry.label, rect);
+    });
+  }
+
   render(ctx: CanvasRenderingContext2D, width: number, height: number): void {
     this.ensureInitialized(width, height);
 
@@ -1890,6 +2089,10 @@ export class Game {
     ctx.fillText(String(this.score1), width / 2, height * 0.28);
     ctx.fillText(String(this.score2), width / 2, height * 0.72);
     ctx.restore();
+
+    if (this.isMatchActive() && !this.paused) {
+      this.renderPauseButton(ctx, width, height);
+    }
 
     if (this.titleScreenActive) {
       ctx.fillStyle = 'rgba(10, 17, 40, 0.55)';
@@ -1987,6 +2190,10 @@ export class Game {
       applyTextStyle(ctx, 'secondary', height * 0.025);
       ctx.fillText('Tap to play again', width / 2, height / 2 + height * 0.04);
       ctx.restore();
+    }
+
+    if (this.paused) {
+      this.renderPauseOverlay(ctx, width, height);
     }
 
     ctx.restore();

@@ -1187,3 +1187,140 @@ describe('Game screen shake', () => {
     expect(game.screenShakeRemaining).toBe(firstRemaining);
   });
 });
+
+describe('Game pause (#70)', () => {
+  // The pause button and the three overlay action buttons are all ratios of
+  // width/height alone (see their *Ratio constants in game.ts), so these
+  // hold for any canvas size at the default 400x800 used by startGame.
+  const PAUSE_BUTTON_X = 352;
+  const PAUSE_BUTTON_Y = 48;
+  const RESUME_BUTTON_X = 200;
+  const RESUME_BUTTON_Y = 332;
+  const RESTART_BUTTON_Y = 424;
+  const QUIT_BUTTON_Y = 516;
+
+  it('does not pause when tapping the pause button coordinates before a match starts', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+
+    game.onPointerDown(1, PAUSE_BUTTON_X, PAUSE_BUTTON_Y, 400, 800);
+
+    expect(game.paused).toBe(false);
+    expect(game.mapSelectActive).toBe(true); // the tap dismissed the title screen instead
+  });
+
+  it('pauses the match when the pause button is tapped during an active match', () => {
+    const game = startGame();
+
+    game.onPointerDown(1, PAUSE_BUTTON_X, PAUSE_BUTTON_Y, 400, 800);
+
+    expect(game.paused).toBe(true);
+  });
+
+  it('does not show/hit-test the pause button on the win screen, restarting the match instead', () => {
+    const game = startGame();
+    for (let i = 0; i < 11; i += 1) {
+      game.ballY = 900;
+      game.ballVY = 300;
+      game.update(0.001, 400, 800);
+      game.update(2, 400, 800);
+    }
+    expect(game.winner).toBe(1);
+
+    game.onPointerDown(1, PAUSE_BUTTON_X, PAUSE_BUTTON_Y, 400, 800);
+
+    expect(game.paused).toBe(false);
+    expect(game.winner).toBeNull(); // the win screen's tap-to-restart handled it instead
+  });
+
+  it('freezes ball position and velocity while paused', () => {
+    const game = startGame();
+    const { ballX, ballY, ballVX, ballVY } = game;
+    game.onPointerDown(1, PAUSE_BUTTON_X, PAUSE_BUTTON_Y, 400, 800);
+
+    game.update(1, 400, 800);
+
+    expect(game.ballX).toBe(ballX);
+    expect(game.ballY).toBe(ballY);
+    expect(game.ballVX).toBe(ballVX);
+    expect(game.ballVY).toBe(ballVY);
+  });
+
+  it('freezes the power-up spawn timer while paused', () => {
+    const game = startGame();
+    game.onPointerDown(1, PAUSE_BUTTON_X, PAUSE_BUTTON_Y, 400, 800);
+
+    game.update(POWER_UP_SPAWN_INTERVAL_SECONDS + 1, 400, 800); // would spawn one if unpaused
+
+    expect(game.activePowerUp).toBeNull();
+  });
+
+  it('does not move a paddle while dragging a pointer that went down before the pause', () => {
+    const game = startGame();
+    game.onPointerDown(2, 50, 700, 400, 800); // starts dragging paddle 2
+    const paddle2XBeforePause = game.paddle2X;
+    game.onPointerDown(1, PAUSE_BUTTON_X, PAUSE_BUTTON_Y, 400, 800); // pauses with a second pointer
+
+    game.onPointerMove(2, 350, 400);
+
+    expect(game.paddle2X).toBe(paddle2XBeforePause);
+  });
+
+  it('resumes exactly where the match left off (score, ball, power-ups unchanged) when Resume is tapped', () => {
+    const game = startGame();
+    game.lastPaddleTouch = 1;
+    game.activePowerUp = { id: 1, kind: 'fast-ball', x: game.ballX, y: game.ballY };
+    game.score1 = 3;
+    game.score2 = 5;
+    const { ballX, ballY, ballVX, ballVY } = game;
+    game.onPointerDown(1, PAUSE_BUTTON_X, PAUSE_BUTTON_Y, 400, 800);
+    game.update(2, 400, 800); // frozen while paused
+
+    game.onPointerDown(1, RESUME_BUTTON_X, RESUME_BUTTON_Y, 400, 800);
+
+    expect(game.paused).toBe(false);
+    expect(game.score1).toBe(3);
+    expect(game.score2).toBe(5);
+    expect(game.ballX).toBe(ballX);
+    expect(game.ballY).toBe(ballY);
+    expect(game.ballVX).toBe(ballVX);
+    expect(game.ballVY).toBe(ballVY);
+    expect(game.activePowerUp).toEqual({ id: 1, kind: 'fast-ball', x: ballX, y: ballY });
+  });
+
+  it('resets score/ball/power-ups but keeps the selected map when Restart Match is tapped', () => {
+    const game = startGame(); // picks Earth
+    game.score1 = 3;
+    game.score2 = 5;
+    game.activePowerUp = { id: 1, kind: 'fast-ball', x: game.ballX, y: game.ballY };
+    game.onPointerDown(1, PAUSE_BUTTON_X, PAUSE_BUTTON_Y, 400, 800);
+
+    game.onPointerDown(1, RESUME_BUTTON_X, RESTART_BUTTON_Y, 400, 800);
+
+    expect(game.paused).toBe(false);
+    expect(game.score1).toBe(0);
+    expect(game.score2).toBe(0);
+    expect(game.activePowerUp).toBeNull();
+    expect(game.selectedMap).toBe('earth');
+    expect(game.mapSelectActive).toBe(false);
+  });
+
+  it('returns to the title screen, clearing the selected map, when Quit to Title is tapped', () => {
+    const game = startGame(); // picks Earth
+    game.score1 = 3;
+    game.score2 = 5;
+    game.onPointerDown(1, PAUSE_BUTTON_X, PAUSE_BUTTON_Y, 400, 800);
+
+    game.onPointerDown(1, RESUME_BUTTON_X, QUIT_BUTTON_Y, 400, 800);
+
+    expect(game.paused).toBe(false);
+    expect(game.titleScreenActive).toBe(true);
+    expect(game.mapSelectActive).toBe(false);
+    expect(game.selectedMap).toBeNull();
+    expect(game.score1).toBe(0);
+    expect(game.score2).toBe(0);
+
+    game.onPointerDown(1, 200, 400, 400, 800); // requires re-picking a map, same as a fresh title dismissal
+    expect(game.mapSelectActive).toBe(true);
+  });
+});
