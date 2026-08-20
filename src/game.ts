@@ -628,6 +628,7 @@ export class Game {
     if (this.titleScreenActive) {
       this.titleScreenActive = false;
       this.mapSelectActive = true;
+      return;
     }
     if (this.mapSelectActive) {
       const chosen = this.mapAt(x, y, width, height);
