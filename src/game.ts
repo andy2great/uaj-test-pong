@@ -303,6 +303,25 @@ const MAP_BUTTON_WIDTH_RATIO = 0.6; // fraction of canvas width
 const MAP_BUTTON_HEIGHT_RATIO = 0.1; // fraction of canvas height
 const MAP_BUTTON_GAP_RATIO = 0.04; // fraction of canvas height, between buttons
 
+// Shared menu identity: the title and map-select screens both draw inside a
+// bordered, vignetted panel topped by the same orbiting-icon flourish, so
+// they read as one designed system instead of two disconnected overlays
+// (issue #67).
+const MENU_PANEL_WIDTH_RATIO = 0.78; // fraction of canvas width
+const MENU_PANEL_RADIUS_RATIO = 0.08; // fraction of panel height, corner radius
+const MENU_TITLE_PANEL_HEIGHT_RATIO = 0.3; // fraction of canvas height
+const MAP_SELECT_PANEL_TOP_PADDING_RATIO = 0.052; // fraction of canvas height, above the flourish icon
+const MAP_SELECT_PANEL_BOTTOM_PADDING_RATIO = 0.05; // fraction of canvas height, below the last map card
+const MENU_ICON_ORBIT_RADIUS_RATIO = 0.032; // fraction of canvas height
+const MENU_ICON_CORE_RADIUS_RATIO = 0.013; // fraction of canvas height
+const MENU_ICON_DOT_RADIUS_RATIO = 0.008; // fraction of canvas height
+const MENU_ICON_ORBIT_SPEED = 1.4; // radians/second
+
+// Map-select card iconography: a small themed "planet" swatch to the left of
+// each map's label, hinting at the map beyond a plain text button.
+const MAP_CARD_ICON_RADIUS_RATIO = 0.32; // fraction of card height
+const MAP_CARD_ICON_MARGIN_RATIO = 0.55; // fraction of card height, icon center from the card's left edge
+
 // Pure so it can be unit tested directly: position of a body orbiting
 // (centerX, centerY) at the given radius/speed/phase at time `time`. The
 // vertical axis is flattened slightly to read as a gentle drift rather than a
@@ -1411,6 +1430,132 @@ export class Game {
     this.renderScorePanel(ctx, width / 2, height * 0.72, panelWidth, panelHeight, panelRadius);
   }
 
+  // Small orbiting-dot icon shared by the title and map-select screens: a
+  // glowing core with one satellite, echoing the backdrop's orbiting planets
+  // so both menu screens read as the same designed system (issue #67).
+  private renderMenuIcon(ctx: CanvasRenderingContext2D, x: number, y: number, height: number): void {
+    const coreRadius = height * MENU_ICON_CORE_RADIUS_RATIO;
+    const orbitRadius = height * MENU_ICON_ORBIT_RADIUS_RATIO;
+    const dotRadius = height * MENU_ICON_DOT_RADIUS_RATIO;
+    const dot = orbitPosition(x, y, orbitRadius, MENU_ICON_ORBIT_SPEED, 0, this.backdropTime);
+
+    ctx.save();
+    ctx.strokeStyle = 'rgba(232, 236, 245, 0.3)';
+    ctx.lineWidth = Math.max(1, coreRadius * 0.15);
+    ctx.beginPath();
+    ctx.arc(x, y, orbitRadius, 0, Math.PI * 2);
+    ctx.stroke();
+
+    const glow = ctx.createRadialGradient(x, y, 0, x, y, coreRadius * 2.6);
+    glow.addColorStop(0, 'rgba(120, 170, 255, 0.85)');
+    glow.addColorStop(1, 'rgba(120, 170, 255, 0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(x, y, coreRadius * 2.6, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#e8ecf5';
+    ctx.beginPath();
+    ctx.arc(x, y, coreRadius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.arc(dot.x, dot.y, dotRadius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  // Draws the bordered, vignetted panel that frames title/map-select
+  // content, replacing the plain full-screen tint with a shared "menu card"
+  // treatment (issue #67).
+  private renderMenuPanel(
+    ctx: CanvasRenderingContext2D,
+    centerX: number,
+    centerY: number,
+    panelWidth: number,
+    panelHeight: number,
+  ): void {
+    const radius = panelHeight * MENU_PANEL_RADIUS_RATIO;
+    const x = centerX - panelWidth / 2;
+    const y = centerY - panelHeight / 2;
+    ctx.save();
+    const vignette = ctx.createRadialGradient(centerX, centerY, 0, centerX, centerY, panelWidth / 2);
+    vignette.addColorStop(0, 'rgba(10, 17, 40, 0.7)');
+    vignette.addColorStop(1, 'rgba(10, 17, 40, 0.35)');
+    ctx.fillStyle = vignette;
+    ctx.beginPath();
+    ctx.roundRect(x, y, panelWidth, panelHeight, radius);
+    ctx.fill();
+    ctx.strokeStyle = 'rgba(232, 236, 245, 0.3)';
+    ctx.lineWidth = Math.max(1, panelHeight * 0.006);
+    ctx.stroke();
+    ctx.restore();
+  }
+
+  // Draws one map-select button as a themed card -- gradient fill, glowing
+  // border, and a small planet swatch that hints at the map -- replacing the
+  // flat filled rectangle + plain label from the original map-select screen
+  // (issue #67).
+  private renderMapCard(
+    ctx: CanvasRenderingContext2D,
+    theme: MapTheme,
+    rect: { x: number; y: number; w: number; h: number },
+  ): void {
+    const centerY = rect.y + rect.h / 2;
+    const radius = rect.h * 0.25;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.roundRect(rect.x, rect.y, rect.w, rect.h, radius);
+    const fill = ctx.createLinearGradient(rect.x, rect.y, rect.x, rect.y + rect.h);
+    fill.addColorStop(0, theme.backgroundColor);
+    fill.addColorStop(1, 'rgba(10, 17, 40, 0.92)');
+    ctx.fillStyle = fill;
+    ctx.fill();
+    ctx.shadowColor = `rgba(${theme.starGlowRgb}, 0.45)`;
+    ctx.shadowBlur = rect.h * 0.3;
+    ctx.strokeStyle = 'rgba(232, 236, 245, 0.4)';
+    ctx.lineWidth = Math.max(1, rect.h * 0.035);
+    ctx.stroke();
+    ctx.restore();
+
+    const iconRadius = rect.h * MAP_CARD_ICON_RADIUS_RATIO;
+    const iconX = rect.x + rect.h * MAP_CARD_ICON_MARGIN_RATIO;
+    const palette = theme.planetPalettes[0];
+    ctx.save();
+    const iconGradient = ctx.createRadialGradient(
+      iconX - iconRadius * 0.3,
+      centerY - iconRadius * 0.3,
+      iconRadius * 0.1,
+      iconX,
+      centerY,
+      iconRadius,
+    );
+    iconGradient.addColorStop(0, palette.colorNear);
+    iconGradient.addColorStop(1, palette.colorFar);
+    ctx.fillStyle = iconGradient;
+    ctx.beginPath();
+    ctx.arc(iconX, centerY, iconRadius, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.restore();
+
+    const textX = iconX + iconRadius + rect.h * 0.28;
+    ctx.save();
+    ctx.fillStyle = '#e8ecf5';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    applyTextStyle(ctx, 'primary', rect.h * 0.34);
+    ctx.fillText(theme.label, textX, centerY - rect.h * 0.12);
+    ctx.restore();
+
+    ctx.save();
+    ctx.fillStyle = 'rgba(232, 236, 245, 0.65)';
+    ctx.textAlign = 'left';
+    ctx.textBaseline = 'middle';
+    applyTextStyle(ctx, 'secondary', rect.h * 0.15);
+    ctx.fillText('Tap to launch', textX, centerY + rect.h * 0.18);
+    ctx.restore();
+  }
+
   render(ctx: CanvasRenderingContext2D, width: number, height: number): void {
     this.ensureInitialized(width, height);
 
@@ -1500,6 +1645,11 @@ export class Game {
       ctx.fillStyle = 'rgba(10, 17, 40, 0.55)';
       ctx.fillRect(0, 0, width, height);
 
+      const panelWidth = width * MENU_PANEL_WIDTH_RATIO;
+      const panelHeight = height * MENU_TITLE_PANEL_HEIGHT_RATIO;
+      this.renderMenuPanel(ctx, width / 2, height / 2, panelWidth, panelHeight);
+      this.renderMenuIcon(ctx, width / 2, height / 2 - panelHeight * 0.32, height);
+
       ctx.save();
       ctx.fillStyle = '#e8ecf5';
       ctx.textAlign = 'center';
@@ -1507,7 +1657,7 @@ export class Game {
       ctx.shadowColor = 'rgba(120, 170, 255, 0.85)';
       ctx.shadowBlur = height * 0.025;
       applyTextStyle(ctx, 'primary', height * 0.06);
-      ctx.fillText(GAME_TITLE, width / 2, height / 2 - height * 0.04);
+      ctx.fillText(GAME_TITLE, width / 2, height / 2 - height * 0.01);
       ctx.restore();
 
       ctx.save();
@@ -1517,7 +1667,7 @@ export class Game {
       ctx.shadowColor = 'rgba(120, 170, 255, 0.85)';
       ctx.shadowBlur = height * 0.02;
       applyTextStyle(ctx, 'secondary', height * 0.025);
-      ctx.fillText('Tap to start', width / 2, height / 2 + height * 0.04);
+      ctx.fillText('Tap to start', width / 2, height / 2 + height * 0.08);
       ctx.restore();
     }
 
@@ -1527,6 +1677,16 @@ export class Game {
 
       const themes = Object.values(MAP_THEMES);
       const firstRect = this.mapButtonRect(0, width, height);
+      const lastRect = this.mapButtonRect(themes.length - 1, width, height);
+      const headingY = firstRect.y - height * 0.06;
+      const iconY = headingY - height * 0.065;
+
+      const panelWidth = width * MENU_PANEL_WIDTH_RATIO;
+      const panelTop = iconY - height * MAP_SELECT_PANEL_TOP_PADDING_RATIO;
+      const panelBottom = lastRect.y + lastRect.h + height * MAP_SELECT_PANEL_BOTTOM_PADDING_RATIO;
+      const panelHeight = panelBottom - panelTop;
+      this.renderMenuPanel(ctx, width / 2, panelTop + panelHeight / 2, panelWidth, panelHeight);
+      this.renderMenuIcon(ctx, width / 2, iconY, height);
 
       ctx.save();
       ctx.fillStyle = '#e8ecf5';
@@ -1535,26 +1695,12 @@ export class Game {
       ctx.shadowColor = 'rgba(120, 170, 255, 0.85)';
       ctx.shadowBlur = height * 0.02;
       applyTextStyle(ctx, 'secondary', height * 0.03);
-      ctx.fillText('Choose your map', width / 2, firstRect.y - height * 0.06);
+      ctx.fillText('Choose your map', width / 2, headingY);
       ctx.restore();
 
       themes.forEach((theme, i) => {
         const rect = this.mapButtonRect(i, width, height);
-        ctx.save();
-        ctx.beginPath();
-        ctx.roundRect(rect.x, rect.y, rect.w, rect.h, rect.h * 0.25);
-        ctx.fillStyle = theme.backgroundColor;
-        ctx.fill();
-        ctx.strokeStyle = 'rgba(232, 236, 245, 0.35)';
-        ctx.lineWidth = Math.max(1, rect.h * 0.04);
-        ctx.stroke();
-
-        ctx.fillStyle = '#e8ecf5';
-        ctx.textAlign = 'center';
-        ctx.textBaseline = 'middle';
-        applyTextStyle(ctx, 'primary', rect.h * 0.4);
-        ctx.fillText(theme.label, rect.x + rect.w / 2, rect.y + rect.h / 2);
-        ctx.restore();
+        this.renderMapCard(ctx, theme, rect);
       });
     }
 
