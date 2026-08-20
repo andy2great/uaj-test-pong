@@ -44,6 +44,15 @@ const COMET_TAIL_BASE_LENGTH_RATIO = 1.6; // tail length at rest, multiple of ba
 const COMET_TAIL_SPEED_LENGTH_RATIO = 3.2; // extra tail length per unit of speed factor
 const COMET_TAIL_BASE_OPACITY = 0.25;
 const COMET_TAIL_SPEED_OPACITY = 0.5;
+
+// Comet/paddle surface texture tuning (purely cosmetic overlays, drawn on
+// top of the existing gradients -- do not affect BALL_RADIUS_RATIO,
+// PADDLE_WIDTH_RATIO/PADDLE_HEIGHT_RATIO, or any collision geometry).
+const COMET_TEXTURE_SPOT_COUNT = 6; // mottled patches drawn on the comet core
+const COMET_TEXTURE_SPOT_DISTANCE_RATIO = 0.5; // patch offset from center, multiple of ball radius
+const COMET_TEXTURE_SPOT_RADIUS_RATIO = 0.22; // patch radius, multiple of ball radius
+const PADDLE_TEXTURE_STREAK_COUNT = 7; // brushed-metal streaks drawn across the paddle body
+
 const MAX_BOUNCE_ANGLE = Math.PI / 3; // 60 degrees from vertical at the paddle edges
 const WINNING_SCORE = 11; // first player to reach this score wins the match
 const SERVE_DELAY_SECONDS = 1; // pause after a point before the ball re-serves
@@ -1837,6 +1846,27 @@ export class Game {
     ctx.beginPath();
     ctx.arc(x, y, radius, 0, Math.PI * 2);
     ctx.fill();
+
+    // Icy surface texture: small mottled patches clipped to the ball so the
+    // comet reads as a textured body rather than a single smooth gradient.
+    // Positions are fixed relative to the ball (not the frame), so the
+    // pattern stays legible instead of flickering as the comet moves.
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.clip();
+    for (let i = 0; i < COMET_TEXTURE_SPOT_COUNT; i++) {
+      const angle = (i / COMET_TEXTURE_SPOT_COUNT) * Math.PI * 2;
+      const spotDist = radius * COMET_TEXTURE_SPOT_DISTANCE_RATIO * (i % 2 === 0 ? 1 : 0.6);
+      const spotX = x + Math.cos(angle) * spotDist;
+      const spotY = y + Math.sin(angle) * spotDist;
+      const spotRadius = radius * COMET_TEXTURE_SPOT_RADIUS_RATIO * (i % 3 === 0 ? 1.3 : 0.8);
+      ctx.fillStyle = i % 2 === 0 ? 'rgba(20, 40, 90, 0.16)' : 'rgba(255, 255, 255, 0.22)';
+      ctx.beginPath();
+      ctx.arc(spotX, spotY, spotRadius, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
   }
 
   // Draws a paddle as a rounded, gradient-shaded bar with a drop shadow and a
@@ -1857,6 +1887,24 @@ export class Game {
     gradient.addColorStop(1, '#2a6f97');
     ctx.fillStyle = gradient;
     ctx.fillRect(x, y, w, paddleHeight);
+    ctx.restore();
+
+    // Brushed-metal texture: thin vertical streaks clipped to the paddle
+    // body, alternating light/dark at low opacity so the surface reads as
+    // ridged rather than flat without obscuring the paddle at gameplay speed.
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(x, y, w, paddleHeight);
+    ctx.clip();
+    ctx.lineWidth = Math.max(1, w * 0.015);
+    for (let i = 0; i < PADDLE_TEXTURE_STREAK_COUNT; i++) {
+      const streakX = x + (w * (i + 0.5)) / PADDLE_TEXTURE_STREAK_COUNT;
+      ctx.strokeStyle = i % 2 === 0 ? 'rgba(255, 255, 255, 0.16)' : 'rgba(10, 30, 50, 0.14)';
+      ctx.beginPath();
+      ctx.moveTo(streakX, y);
+      ctx.lineTo(streakX, y + paddleHeight);
+      ctx.stroke();
+    }
     ctx.restore();
 
     ctx.fillStyle = 'rgba(255, 255, 255, 0.55)';
