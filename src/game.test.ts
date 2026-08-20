@@ -11,6 +11,7 @@ import {
   SPEED_BOOST_DURATION_SECONDS,
   SPEED_BOOST_MULTIPLIER,
   clamp,
+  eccentricOrbitPosition,
   orbitPosition,
   reflectOffPaddle,
 } from './game';
@@ -88,6 +89,26 @@ describe('orbitPosition', () => {
     const positiveSpeed = orbitPosition(0, 0, 50, 1, 0, 0.5);
     const negativeSpeed = orbitPosition(0, 0, 50, -1, 0, 0.5);
     expect(positiveSpeed.y).toBeCloseTo(-negativeSpeed.y);
+  });
+});
+
+describe('eccentricOrbitPosition', () => {
+  it('starts at the phase angle when time is zero', () => {
+    const { x, y } = eccentricOrbitPosition(100, 100, 50, 1, 0, 0);
+    expect(x).toBeCloseTo(100 + 50 * 1.4);
+    expect(y).toBeCloseTo(100);
+  });
+
+  it('advances around the orbit as time increases', () => {
+    const start = eccentricOrbitPosition(100, 100, 50, 1, 0, 0);
+    const later = eccentricOrbitPosition(100, 100, 50, 1, 0, 1);
+    expect(later.x).not.toBeCloseTo(start.x);
+  });
+
+  it('stretches the orbit radius beyond a circular orbit at some points', () => {
+    const stretched = eccentricOrbitPosition(0, 0, 50, 1, 0, 0);
+    const circular = orbitPosition(0, 0, 50, 1, 0, 0);
+    expect(Math.hypot(stretched.x, stretched.y)).toBeGreaterThan(Math.hypot(circular.x, circular.y));
   });
 });
 

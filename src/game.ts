@@ -168,6 +168,42 @@ const STARS: Star[] = Array.from({ length: STAR_COUNT }, (_, i) => ({
   twinklePhase: hash01(i * 2.3 + 5) * Math.PI * 2,
 }));
 
+// Earth theme (#68): soft fluffy clouds drift across the upper sky, giving
+// the "fun" backdrop the stakeholder asked for instead of a recolored
+// starfield. Positions wrap horizontally as `backdropTime` advances.
+const CLOUD_COUNT = 6;
+interface Cloud {
+  xRatio: number;
+  yRatio: number;
+  scale: number;
+  speedRatio: number; // canvas-widths per second, drifting left-to-right
+}
+const CLOUDS: Cloud[] = Array.from({ length: CLOUD_COUNT }, (_, i) => ({
+  xRatio: hash01(i * 4.7 + 11),
+  yRatio: 0.05 + hash01(i * 6.3 + 13) * 0.18,
+  scale: 0.6 + hash01(i * 8.1 + 17) * 0.8,
+  speedRatio: 0.015 + hash01(i * 2.9 + 19) * 0.02,
+}));
+
+// Mars theme (#68): a thin reddish dust haze drifts diagonally across the
+// backdrop, evoking the Outer Wilds-style harsh, dusty look the ticket asked
+// for instead of a recolored starfield.
+const DUST_STREAK_COUNT = 10;
+interface DustStreak {
+  xRatio: number;
+  yRatio: number;
+  lengthRatio: number; // fraction of canvas width
+  speedRatio: number; // canvas-widths per second
+  angle: number; // radians
+}
+const DUST_STREAKS: DustStreak[] = Array.from({ length: DUST_STREAK_COUNT }, (_, i) => ({
+  xRatio: hash01(i * 5.9 + 23),
+  yRatio: hash01(i * 3.3 + 29),
+  lengthRatio: 0.04 + hash01(i * 7.1 + 31) * 0.06,
+  speedRatio: 0.03 + hash01(i * 9.7 + 37) * 0.04,
+  angle: Math.PI * 0.15 + hash01(i * 4.1 + 41) * Math.PI * 0.1,
+}));
+
 // Glow gradients are anchored to absolute canvas pixel positions, so they're
 // only rebuilt when the canvas size changes rather than allocated fresh every
 // frame -- 50 stars x 60fps worth of `createRadialGradient` calls would be
@@ -218,6 +254,7 @@ interface PlanetConfig {
 }
 const ORBIT_CENTER_X_RATIO = 0.5;
 const ORBIT_CENTER_Y_RATIO = 0.38;
+const MARS_TUMBLE_SPEED = 0.35; // radians/sec the Mars surface texture rotates by, evoking a slowly tumbling body
 const PLANETS: PlanetConfig[] = [
   {
     radiusRatio: 0.05,
@@ -241,8 +278,10 @@ const PLANETS: PlanetConfig[] = [
 ];
 
 // Map-select (#57): the player picks Earth or Mars before the first serve,
-// which swaps the backdrop's background/star/planet colors below. Gameplay
-// (ball/paddle/power-ups) never reads `selectedMap` or these palettes.
+// which swaps the backdrop's background color/palette below and, per-theme
+// (#68), its backdrop elements and motion too -- see `renderEarthBackdrop`/
+// `renderMarsBackdrop`. Gameplay (ball/paddle/power-ups) never reads
+// `selectedMap` or these palettes.
 export type MapId = 'earth' | 'mars';
 
 interface PlanetPalette {
@@ -338,6 +377,27 @@ export function orbitPosition(
   return {
     x: centerX + Math.cos(angle) * orbitRadius,
     y: centerY + Math.sin(angle) * orbitRadius * 0.55,
+  };
+}
+
+// Pure so it can be unit tested directly: like `orbitPosition`, but the
+// orbit radius itself stretches and compresses as the angle advances,
+// tracing an elongated, comet-like path instead of a smooth ellipse --
+// used by the Mars/Outer-Wilds-inspired backdrop so its bodies read as
+// eccentric orbiters rather than the default map's calm circular drift.
+export function eccentricOrbitPosition(
+  centerX: number,
+  centerY: number,
+  orbitRadius: number,
+  angularSpeed: number,
+  phase: number,
+  time: number,
+): { x: number; y: number } {
+  const angle = phase + angularSpeed * time;
+  const stretch = 1 + 0.4 * Math.cos(angle * 2);
+  return {
+    x: centerX + Math.cos(angle) * orbitRadius * stretch,
+    y: centerY + Math.sin(angle) * orbitRadius * 0.55 * (2 - stretch),
   };
 }
 
@@ -1017,14 +1077,26 @@ export class Game {
     }
   }
 
-  // Starfield + orbiting planets, drawn behind everything else. Purely
-  // decorative: reads `backdropTime` (advanced by `update`) but never
-  // touches ball/paddle state.
+  // Dispatches to the per-map backdrop. Purely decorative: reads
+  // `backdropTime`/`selectedMap` but never touches ball/paddle state. Before
+  // a map is picked (title/map-select screens), the shared default backdrop
+  // is shown so it stays visually distinct from either selectable theme.
   private renderBackdrop(ctx: CanvasRenderingContext2D, width: number, height: number): void {
-    const theme = this.selectedMap ? MAP_THEMES[this.selectedMap] : null;
-    const starColor = theme?.starColor ?? DEFAULT_STAR_COLOR;
-    const planetPalettes = theme?.planetPalettes ?? DEFAULT_PLANET_PALETTES;
-    const glowGradients = getStarGlowGradients(ctx, width, height, theme?.starGlowRgb ?? DEFAULT_STAR_GLOW_RGB);
+    if (this.selectedMap === 'earth') {
+      this.renderEarthBackdrop(ctx, width, height);
+      return;
+    }
+    if (this.selectedMap === 'mars') {
+      this.renderMarsBackdrop(ctx, width, height);
+      return;
+    }
+    this.renderDefaultBackdrop(ctx, width, height);
+  }
+
+  // Twinkling starfield, shared by all three backdrops -- only the star
+  // color/glow tint varies per theme.
+  private renderStarfield(ctx: CanvasRenderingContext2D, width: number, height: number, starColor: string, starGlowRgb: string): void {
+    const glowGradients = getStarGlowGradients(ctx, width, height, starGlowRgb);
     STARS.forEach((star, i) => {
       const twinkle = 0.4 + 0.6 * (0.5 + 0.5 * Math.sin(this.backdropTime * star.twinkleSpeed + star.twinklePhase));
       const x = star.xRatio * width;
@@ -1044,12 +1116,17 @@ export class Game {
       ctx.fill();
     });
     ctx.globalAlpha = 1;
+  }
 
+  // Shown before a map is picked: the original calm starfield + circular
+  // planet orbits, kept exactly as before so it reads as its own neutral
+  // backdrop rather than a third theme.
+  private renderDefaultBackdrop(ctx: CanvasRenderingContext2D, width: number, height: number): void {
+    this.renderStarfield(ctx, width, height, DEFAULT_STAR_COLOR, DEFAULT_STAR_GLOW_RGB);
     const centerX = width * ORBIT_CENTER_X_RATIO;
     const centerY = height * ORBIT_CENTER_Y_RATIO;
     const minSide = Math.min(width, height);
     PLANETS.forEach((planet, planetIndex) => {
-      const palette = planetPalettes[planetIndex];
       const { x, y } = orbitPosition(
         centerX,
         centerY,
@@ -1059,59 +1136,228 @@ export class Game {
         this.backdropTime,
       );
       const radius = planet.radiusRatio * height;
-
-      if (planet.ring) {
-        this.renderPlanetRing(ctx, x, y, radius, planet.ring, 'back');
-      }
-
-      const gradient = ctx.createRadialGradient(x - radius * 0.3, y - radius * 0.3, radius * 0.1, x, y, radius);
-      gradient.addColorStop(0, palette.colorNear);
-      gradient.addColorStop(1, palette.colorFar);
-      ctx.fillStyle = gradient;
-      ctx.beginPath();
-      ctx.arc(x, y, radius, 0, Math.PI * 2);
-      ctx.fill();
-
-      // Surface bands + a day/night terminator, both clipped to the planet's
-      // disc, are what turn the flat gradient fill into something that reads
-      // as a lit sphere with texture rather than a plain shaded ball.
-      ctx.save();
-      ctx.beginPath();
-      ctx.arc(x, y, radius, 0, Math.PI * 2);
-      ctx.clip();
-
-      const bandCount = 4;
-      ctx.fillStyle = palette.bandColor;
-      for (let band = 0; band < bandCount; band++) {
-        const bandSeed = planetIndex * 19.7 + band * 7.3;
-        const bandY = y - radius + hash01(bandSeed + 61) * radius * 2;
-        const bandHeight = radius * (0.12 + hash01(bandSeed + 67) * 0.22);
-        ctx.globalAlpha = 0.1 + hash01(bandSeed + 73) * 0.16;
-        ctx.fillRect(x - radius, bandY, radius * 2, bandHeight);
-      }
-
-      const shadowCenterX = x + radius * 0.45;
-      const shadowCenterY = y + radius * 0.45;
-      const terminator = ctx.createRadialGradient(
-        shadowCenterX,
-        shadowCenterY,
-        radius * 0.15,
-        shadowCenterX,
-        shadowCenterY,
-        radius * 1.3,
-      );
-      terminator.addColorStop(0, 'rgba(6, 8, 24, 0)');
-      terminator.addColorStop(1, 'rgba(6, 8, 24, 0.6)');
-      ctx.globalAlpha = 1;
-      ctx.fillStyle = terminator;
-      ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
-      ctx.restore();
-      ctx.globalAlpha = 1;
-
-      if (planet.ring) {
-        this.renderPlanetRing(ctx, x, y, radius, planet.ring, 'front');
-      }
+      this.renderPlanet(ctx, x, y, radius, DEFAULT_PLANET_PALETTES[planetIndex], planetIndex, planet.ring, 'bands', 0);
     });
+  }
+
+  // Earth theme (#68): fluffy drifting clouds plus a small bubbly moon
+  // orbiting each planet -- a "fun", lived-in backdrop rather than the
+  // default backdrop with swapped colors.
+  private renderEarthBackdrop(ctx: CanvasRenderingContext2D, width: number, height: number): void {
+    const theme = MAP_THEMES.earth;
+    this.renderStarfield(ctx, width, height, theme.starColor, theme.starGlowRgb);
+    this.renderClouds(ctx, width, height);
+    const centerX = width * ORBIT_CENTER_X_RATIO;
+    const centerY = height * ORBIT_CENTER_Y_RATIO;
+    const minSide = Math.min(width, height);
+    PLANETS.forEach((planet, planetIndex) => {
+      const { x, y } = orbitPosition(
+        centerX,
+        centerY,
+        planet.orbitRadiusRatio * minSide,
+        planet.angularSpeed,
+        planet.phase,
+        this.backdropTime,
+      );
+      const radius = planet.radiusRatio * height;
+      this.renderPlanet(ctx, x, y, radius, theme.planetPalettes[planetIndex], planetIndex, planet.ring, 'bands', 0);
+      this.renderMoon(ctx, x, y, radius, planetIndex);
+    });
+  }
+
+  // Mars theme (#68), inspired by Outer Wilds: bodies trace elongated,
+  // comet-like orbits and slowly tumble, their surfaces cracked rather than
+  // banded, under a drifting reddish dust haze -- a harsher, distinct
+  // backdrop rather than the default backdrop with swapped colors.
+  private renderMarsBackdrop(ctx: CanvasRenderingContext2D, width: number, height: number): void {
+    const theme = MAP_THEMES.mars;
+    this.renderStarfield(ctx, width, height, theme.starColor, theme.starGlowRgb);
+    this.renderDustHaze(ctx, width, height);
+    const centerX = width * ORBIT_CENTER_X_RATIO;
+    const centerY = height * ORBIT_CENTER_Y_RATIO;
+    const minSide = Math.min(width, height);
+    PLANETS.forEach((planet, planetIndex) => {
+      const { x, y } = eccentricOrbitPosition(
+        centerX,
+        centerY,
+        planet.orbitRadiusRatio * minSide,
+        planet.angularSpeed,
+        planet.phase,
+        this.backdropTime,
+      );
+      const radius = planet.radiusRatio * height;
+      const tumble = this.backdropTime * MARS_TUMBLE_SPEED * (planetIndex % 2 === 0 ? 1 : -1);
+      this.renderPlanet(ctx, x, y, radius, theme.planetPalettes[planetIndex], planetIndex, planet.ring, 'cracks', tumble);
+    });
+  }
+
+  // Draws one orbiting body: gradient-shaded sphere, clipped surface
+  // texture (theme-dependent), day/night terminator, and optional ring.
+  // `textureRotation` slowly spins the texture around the disc's center,
+  // independent of the (fixed-direction) terminator shadow, to read as a
+  // tumbling body rather than a static shaded ball.
+  private renderPlanet(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    radius: number,
+    palette: PlanetPalette,
+    planetIndex: number,
+    ring: PlanetRing | undefined,
+    texture: 'bands' | 'cracks',
+    textureRotation: number,
+  ): void {
+    if (ring) {
+      this.renderPlanetRing(ctx, x, y, radius, ring, 'back');
+    }
+
+    const gradient = ctx.createRadialGradient(x - radius * 0.3, y - radius * 0.3, radius * 0.1, x, y, radius);
+    gradient.addColorStop(0, palette.colorNear);
+    gradient.addColorStop(1, palette.colorFar);
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.fill();
+
+    // Surface texture + a day/night terminator, both clipped to the
+    // planet's disc, are what turn the flat gradient fill into something
+    // that reads as a lit sphere rather than a plain shaded ball.
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, Math.PI * 2);
+    ctx.clip();
+
+    ctx.save();
+    if (textureRotation !== 0) {
+      ctx.translate(x, y);
+      ctx.rotate(textureRotation);
+      ctx.translate(-x, -y);
+    }
+    if (texture === 'cracks') {
+      this.renderPlanetCracks(ctx, x, y, radius, planetIndex);
+    } else {
+      this.renderPlanetBands(ctx, x, y, radius, palette, planetIndex);
+    }
+    ctx.restore();
+
+    const shadowCenterX = x + radius * 0.45;
+    const shadowCenterY = y + radius * 0.45;
+    const terminator = ctx.createRadialGradient(
+      shadowCenterX,
+      shadowCenterY,
+      radius * 0.15,
+      shadowCenterX,
+      shadowCenterY,
+      radius * 1.3,
+    );
+    terminator.addColorStop(0, 'rgba(6, 8, 24, 0)');
+    terminator.addColorStop(1, 'rgba(6, 8, 24, 0.6)');
+    ctx.globalAlpha = 1;
+    ctx.fillStyle = terminator;
+    ctx.fillRect(x - radius, y - radius, radius * 2, radius * 2);
+    ctx.restore();
+    ctx.globalAlpha = 1;
+
+    if (ring) {
+      this.renderPlanetRing(ctx, x, y, radius, ring, 'front');
+    }
+  }
+
+  // Default/Earth surface texture: soft horizontal bands, tinted from the
+  // planet's own palette.
+  private renderPlanetBands(
+    ctx: CanvasRenderingContext2D,
+    x: number,
+    y: number,
+    radius: number,
+    palette: PlanetPalette,
+    planetIndex: number,
+  ): void {
+    const bandCount = 4;
+    ctx.fillStyle = palette.bandColor;
+    for (let band = 0; band < bandCount; band++) {
+      const bandSeed = planetIndex * 19.7 + band * 7.3;
+      const bandY = y - radius + hash01(bandSeed + 61) * radius * 2;
+      const bandHeight = radius * (0.12 + hash01(bandSeed + 67) * 0.22);
+      ctx.globalAlpha = 0.1 + hash01(bandSeed + 73) * 0.16;
+      ctx.fillRect(x - radius, bandY, radius * 2, bandHeight);
+    }
+    ctx.globalAlpha = 1;
+  }
+
+  // Mars/Outer-Wilds surface texture: jagged dark canyon cracks instead of
+  // smooth bands, reading as a cratered rock rather than a banded planet.
+  private renderPlanetCracks(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number, planetIndex: number): void {
+    ctx.strokeStyle = 'rgba(40, 12, 6, 0.55)';
+    ctx.lineWidth = Math.max(1, radius * 0.05);
+    ctx.lineJoin = 'round';
+    const crackCount = 5;
+    for (let crack = 0; crack < crackCount; crack++) {
+      const seed = planetIndex * 31.3 + crack * 11.7;
+      const startAngle = hash01(seed + 1) * Math.PI * 2;
+      const startRadius = hash01(seed + 2) * radius * 0.6;
+      let px = x + Math.cos(startAngle) * startRadius;
+      let py = y + Math.sin(startAngle) * startRadius;
+      ctx.beginPath();
+      ctx.moveTo(px, py);
+      const segments = 3 + Math.floor(hash01(seed + 3) * 2);
+      for (let seg = 0; seg < segments; seg++) {
+        const segSeed = seed + seg * 5.1;
+        const angle = hash01(segSeed + 4) * Math.PI * 2;
+        const dist = radius * (0.25 + hash01(segSeed + 5) * 0.35);
+        px += Math.cos(angle) * dist;
+        py += Math.sin(angle) * dist;
+        ctx.lineTo(px, py);
+      }
+      ctx.stroke();
+    }
+  }
+
+  // Earth theme: a small bright moon on its own faster orbit around a
+  // planet, adding a playful secondary motion the default backdrop lacks.
+  private renderMoon(ctx: CanvasRenderingContext2D, planetX: number, planetY: number, planetRadius: number, planetIndex: number): void {
+    const moonRadius = planetRadius * 0.28;
+    const orbitRadius = planetRadius * 1.9;
+    const { x, y } = orbitPosition(planetX, planetY, orbitRadius, 1.1 + planetIndex * 0.3, planetIndex * 2.1, this.backdropTime);
+    const gradient = ctx.createRadialGradient(x - moonRadius * 0.3, y - moonRadius * 0.3, 0, x, y, moonRadius);
+    gradient.addColorStop(0, '#ffffff');
+    gradient.addColorStop(1, '#cfe8ff');
+    ctx.fillStyle = gradient;
+    ctx.beginPath();
+    ctx.arc(x, y, moonRadius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Earth theme: soft fluffy clouds drifting left-to-right across the upper
+  // sky, wrapping around once they exit the right edge.
+  private renderClouds(ctx: CanvasRenderingContext2D, width: number, height: number): void {
+    ctx.fillStyle = 'rgba(255, 255, 255, 0.35)';
+    for (const cloud of CLOUDS) {
+      const driftedX = (((cloud.xRatio + this.backdropTime * cloud.speedRatio) % 1.3) - 0.15) * width;
+      const y = cloud.yRatio * height;
+      const puffRadius = height * 0.03 * cloud.scale;
+      ctx.beginPath();
+      ctx.ellipse(driftedX, y, puffRadius * 1.8, puffRadius * 0.7, 0, 0, Math.PI * 2);
+      ctx.ellipse(driftedX + puffRadius * 1.1, y - puffRadius * 0.2, puffRadius * 1.2, puffRadius * 0.6, 0, 0, Math.PI * 2);
+      ctx.ellipse(driftedX - puffRadius * 1.1, y + puffRadius * 0.1, puffRadius * 1.1, puffRadius * 0.55, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+  }
+
+  // Mars theme: thin reddish dust streaks drifting diagonally across the
+  // backdrop, wrapping around once they exit the field.
+  private renderDustHaze(ctx: CanvasRenderingContext2D, width: number, height: number): void {
+    ctx.strokeStyle = 'rgba(200, 110, 70, 0.25)';
+    ctx.lineWidth = Math.max(1, height * 0.004);
+    for (const streak of DUST_STREAKS) {
+      const driftedX = (((streak.xRatio + this.backdropTime * streak.speedRatio) % 1.2) - 0.1) * width;
+      const y = streak.yRatio * height;
+      const len = streak.lengthRatio * width;
+      ctx.beginPath();
+      ctx.moveTo(driftedX, y);
+      ctx.lineTo(driftedX + Math.cos(streak.angle) * len, y + Math.sin(streak.angle) * len);
+      ctx.stroke();
+    }
   }
 
   // Draws one half of a planet's ring, clipped above/below the planet's
