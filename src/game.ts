@@ -386,6 +386,17 @@ const PAUSE_ACTIONS: { action: PauseAction; label: string }[] = [
   { action: 'quit', label: 'Quit to Title' },
 ];
 
+// Mode select (#80): a two-button stacked screen, styled like the pause
+// overlay, shown right after a map is picked and before the first serve.
+// "2 Player" preserves the pre-existing touch-both-paddles behavior; "1
+// Player" only sets the `singlePlayer` flag here -- the AI that drives the
+// top paddle from it is a companion ticket's responsibility.
+type ModeSelectAction = 'one-player' | 'two-player';
+const MODE_SELECT_ACTIONS: { action: ModeSelectAction; label: string }[] = [
+  { action: 'one-player', label: '1 Player' },
+  { action: 'two-player', label: '2 Player' },
+];
+
 // Pause > Settings (#71): a single stacked-button screen, styled like the
 // pause overlay itself, exposing session-scoped options (currently just the
 // WebAudio sound toggle) without leaving the paused match.
@@ -589,6 +600,8 @@ export class Game {
   titleScreenActive = true; // shown once on first load, dismissed by the first tap
   mapSelectActive = false; // shown right after the title screen, dismissed by picking a map
   selectedMap: MapId | null = null; // null until a map is picked; persists across restartMatch
+  modeSelectActive = false; // shown right after a map is picked, dismissed by choosing 1 or 2 Player
+  singlePlayer = false; // true once "1 Player" is chosen; reset to false (and reselectable) on Quit to Title
   paused = false; // true while the pause overlay (#70) is up; freezes ball/paddle/power-up updates
   pauseMapSelectActive = false; // true while Change Map (#71) is up, shown from within the pause overlay
   pauseSettingsActive = false; // true while Settings (#71) is up, shown from within the pause overlay
@@ -736,6 +749,8 @@ export class Game {
     this.selectedMap = null;
     this.titleScreenActive = true;
     this.mapSelectActive = false;
+    this.modeSelectActive = false;
+    this.singlePlayer = false;
   }
 
   private spawnImpact(x: number, y: number, kind: ImpactKind): void {
@@ -777,7 +792,7 @@ export class Game {
   // win screens) -- shared by the pause button's visibility/hit-test and its
   // render.
   private isMatchActive(): boolean {
-    return !this.titleScreenActive && !this.mapSelectActive && this.winner === null;
+    return !this.titleScreenActive && !this.mapSelectActive && !this.modeSelectActive && this.winner === null;
   }
 
   private pauseButtonRect(width: number, height: number): Rect {
@@ -853,7 +868,7 @@ export class Game {
           this.selectedMap = themeId;
           if (screen === 'map-select') {
             this.mapSelectActive = false;
-            this.serveDelayRemaining = SERVE_DELAY_SECONDS;
+            this.modeSelectActive = true;
           } else {
             // Pause > Change Map (#71): applies the picked map to the
             // backdrop and returns to the pause overlay (still paused)
@@ -897,6 +912,31 @@ export class Game {
     }
   }
 
+  // Bounding box of the index-th mode-select action button (0 = 1 Player, 1
+  // = 2 Player), shared by hit-testing and rendering.
+  private modeSelectButtonRect(index: number, width: number, height: number): Rect {
+    return this.stackedActionButtonRect(index, MODE_SELECT_ACTIONS.length, width, height);
+  }
+
+  // Mode select (#80): shown right after a map is picked. Commits
+  // `singlePlayer` and starts the pre-serve countdown, mirroring what
+  // armMapButton's map-select branch used to do directly before this screen
+  // existed.
+  private armModeSelectButton(pointerId: number, x: number, y: number, width: number, height: number): void {
+    for (let i = 0; i < MODE_SELECT_ACTIONS.length; i += 1) {
+      const rect = this.modeSelectButtonRect(i, width, height);
+      if (rectContains(rect, x, y)) {
+        const action = MODE_SELECT_ACTIONS[i].action;
+        this.armButton(pointerId, `mode-select:${i}`, rect, () => {
+          this.singlePlayer = action === 'one-player';
+          this.modeSelectActive = false;
+          this.serveDelayRemaining = SERVE_DELAY_SECONDS;
+        });
+        return;
+      }
+    }
+  }
+
   // Pause > Settings (#71): toggles session-scoped options or returns to the
   // pause overlay, without touching match state.
   private armPauseSettingsButton(pointerId: number, x: number, y: number, width: number, height: number): void {
@@ -925,6 +965,10 @@ export class Game {
     }
     if (this.mapSelectActive) {
       this.armMapButton(pointerId, x, y, width, height, 'map-select');
+      return;
+    }
+    if (this.modeSelectActive) {
+      this.armModeSelectButton(pointerId, x, y, width, height);
       return;
     }
     if (this.pauseMapSelectActive) {
@@ -1250,7 +1294,7 @@ export class Game {
     this.lastWidth = width;
     this.backdropTime += dt;
 
-    if (this.titleScreenActive || this.mapSelectActive || this.paused) {
+    if (this.titleScreenActive || this.mapSelectActive || this.modeSelectActive || this.paused) {
       return;
     }
 
@@ -2134,6 +2178,41 @@ export class Game {
     });
   }
 
+  // Draws the mode-select screen (#80): a dark scrim, the "Choose your mode"
+  // heading inside a menu panel, and the 1P/2P action buttons -- shown right
+  // after a map is picked, reusing the pause overlay's stacked-button layout
+  // and card styling so the whole pre-match flow reads as one designed menu
+  // system.
+  private renderModeSelectScreen(ctx: CanvasRenderingContext2D, width: number, height: number): void {
+    ctx.fillStyle = 'rgba(10, 17, 40, 0.55)';
+    ctx.fillRect(0, 0, width, height);
+
+    const count = MODE_SELECT_ACTIONS.length;
+    const firstRect = this.modeSelectButtonRect(0, width, height);
+    const lastRect = this.modeSelectButtonRect(count - 1, width, height);
+    const headingY = firstRect.y - height * PAUSE_OVERLAY_HEADING_GAP_RATIO;
+    const panelWidth = width * MENU_PANEL_WIDTH_RATIO;
+    const panelTop = headingY - height * PAUSE_OVERLAY_PANEL_TOP_PADDING_RATIO;
+    const panelBottom = lastRect.y + lastRect.h + height * PAUSE_OVERLAY_PANEL_BOTTOM_PADDING_RATIO;
+    const panelHeight = panelBottom - panelTop;
+    this.renderMenuPanel(ctx, width / 2, panelTop + panelHeight / 2, panelWidth, panelHeight);
+
+    ctx.save();
+    ctx.fillStyle = '#e8ecf5';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(120, 170, 255, 0.85)';
+    ctx.shadowBlur = height * 0.02;
+    applyTextStyle(ctx, 'secondary', height * 0.03);
+    ctx.fillText('Choose your mode', width / 2, headingY);
+    ctx.restore();
+
+    MODE_SELECT_ACTIONS.forEach((entry, i) => {
+      const rect = this.modeSelectButtonRect(i, width, height);
+      this.renderPauseActionButton(ctx, entry.label, rect, this.isPressed(`mode-select:${i}`));
+    });
+  }
+
   // Draws the pause button: a rounded translucent icon showing two vertical
   // bars, docked on the right edge, vertically centered (#79). Purely visual
   // -- hit-testing lives in pauseButtonAt/pauseButtonRect above so they can
@@ -2384,6 +2463,10 @@ export class Game {
     // pause sub-screens so it never draws underneath the pause overlay.
     if (this.mapSelectActive) {
       this.renderMapSelectScreen(ctx, width, height);
+    }
+
+    if (this.modeSelectActive) {
+      this.renderModeSelectScreen(ctx, width, height);
     }
 
     if (this.winner !== null) {

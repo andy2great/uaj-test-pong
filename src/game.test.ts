@@ -16,16 +16,20 @@ import {
   reflectOffPaddle,
 } from './game';
 
-// Dismisses the title screen, picks the Earth map, and clears the pre-serve
-// pause, matching what a player does on first load, so tests can exercise
-// active gameplay directly. The map button's center sits at height * 0.43
-// regardless of canvas size -- see the "Game map select" tests below, which
-// derive the same ratio from the button layout constants.
+// Dismisses the title screen, picks the Earth map, picks 2 Player (the
+// pre-existing touch-both-paddles behavior), and clears the pre-serve pause,
+// matching what a player does on first load, so tests can exercise active
+// gameplay directly. The map button's center sits at height * 0.43 and the
+// "2 Player" button's at height * 0.5875, regardless of canvas size -- see
+// the "Game map select" and "Game mode select" tests below, which derive the
+// same ratios from the button layout constants.
 function startGame(width = 400, height = 800): Game {
   const game = new Game();
   game.update(0, width, height); // initializes, shows the title screen
   game.onPointerDown(-1, width / 2, height / 2, width, height); // dismiss the title screen, shows map-select
-  game.onPointerDown(-1, width / 2, height * 0.43, width, height); // taps the Earth button, starts the first-serve countdown
+  game.onPointerDown(-1, width / 2, height * 0.43, width, height); // taps the Earth button, shows mode-select
+  game.onPointerUp(-1);
+  game.onPointerDown(-1, width / 2, height * 0.5875, width, height); // taps 2 Player, starts the first-serve countdown
   game.onPointerUp(-1);
   game.update(2, width, height); // clears the pre-serve pause and serves the ball
   return game;
@@ -123,7 +127,7 @@ describe('Game title screen', () => {
     expect(game.ballVY).toBe(0);
   });
 
-  it('dismisses the title screen into map-select, then starts the first-serve countdown once a map is tapped', () => {
+  it('dismisses the title screen into map-select, then mode-select, then starts the first-serve countdown once a mode is tapped', () => {
     const game = new Game();
     game.update(0, 400, 800);
 
@@ -142,7 +146,18 @@ describe('Game title screen', () => {
     game.onPointerUp(1);
 
     expect(game.mapSelectActive).toBe(false);
+    expect(game.modeSelectActive).toBe(true);
     expect(game.selectedMap).toBe('earth');
+
+    game.update(2, 400, 800); // mode-select also pauses gameplay
+    expect(game.ballVX).toBe(0);
+    expect(game.ballVY).toBe(0);
+
+    game.onPointerDown(1, 200, 800 * 0.5875, 400, 800); // taps 2 Player
+    game.onPointerUp(1);
+
+    expect(game.modeSelectActive).toBe(false);
+    expect(game.singlePlayer).toBe(false);
 
     game.update(2, 400, 800); // longer than the serve delay
 
@@ -197,7 +212,7 @@ describe('Game map select', () => {
     expect(game.selectedMap).toBeNull();
   });
 
-  it('selects Earth and starts the serve countdown when its button is tapped', () => {
+  it('selects Earth and shows mode-select when its button is tapped', () => {
     const game = new Game();
     game.update(0, 400, 800);
     game.onPointerDown(1, 200, 400, 400, 800); // dismiss the title screen
@@ -206,13 +221,11 @@ describe('Game map select', () => {
     game.onPointerUp(1);
 
     expect(game.mapSelectActive).toBe(false);
+    expect(game.modeSelectActive).toBe(true);
     expect(game.selectedMap).toBe('earth');
-
-    game.update(2, 400, 800);
-    expect(game.ballVX !== 0 || game.ballVY !== 0).toBe(true);
   });
 
-  it('selects Mars and starts the serve countdown when its button is tapped', () => {
+  it('selects Mars and shows mode-select when its button is tapped', () => {
     const game = new Game();
     game.update(0, 400, 800);
     game.onPointerDown(1, 200, 400, 400, 800); // dismiss the title screen
@@ -221,10 +234,8 @@ describe('Game map select', () => {
     game.onPointerUp(1);
 
     expect(game.mapSelectActive).toBe(false);
+    expect(game.modeSelectActive).toBe(true);
     expect(game.selectedMap).toBe('mars');
-
-    game.update(2, 400, 800);
-    expect(game.ballVX !== 0 || game.ballVY !== 0).toBe(true);
   });
 
   it('keeps paddle 1 centered when the Earth button tap lands off-center', () => {
@@ -299,11 +310,117 @@ describe('Game map select', () => {
     marsGame.onPointerDown(1, 200, 400, 400, 800);
     marsGame.onPointerDown(1, 200, 800 * MARS_BUTTON_Y_RATIO, 400, 800);
     marsGame.onPointerUp(1);
+    marsGame.onPointerDown(1, 200, 800 * 0.5875, 400, 800); // taps 2 Player
+    marsGame.onPointerUp(1);
     marsGame.update(2, 400, 800);
 
     const earthSpeed = Math.hypot(earthGame.ballVX, earthGame.ballVY);
     const marsSpeed = Math.hypot(marsGame.ballVX, marsGame.ballVY);
     expect(marsSpeed).toBeCloseTo(earthSpeed);
+  });
+});
+
+describe('Game mode select (#80)', () => {
+  // Button centers are ratios of height alone (see startGame's comment
+  // above), so these hold for any canvas size: 1 Player sits at 0.4725, 2
+  // Player at 0.5875 -- derived from the same stacked-button layout as the
+  // pause overlay (PAUSE_OVERLAY_BUTTON_*_RATIO in game.ts).
+  const ONE_PLAYER_BUTTON_Y_RATIO = 0.4725;
+  const TWO_PLAYER_BUTTON_Y_RATIO = 0.5875;
+
+  function reachModeSelect(): Game {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.onPointerDown(1, 200, 400, 400, 800); // dismiss the title screen
+    game.onPointerDown(1, 200, 800 * 0.43, 400, 800); // taps the Earth button
+    game.onPointerUp(1);
+    return game;
+  }
+
+  it('has no mode committed while the mode-select screen is up', () => {
+    const game = reachModeSelect();
+
+    expect(game.modeSelectActive).toBe(true);
+    expect(game.singlePlayer).toBe(false);
+  });
+
+  it('sets singlePlayer and starts the serve countdown when 1 Player is tapped', () => {
+    const game = reachModeSelect();
+
+    game.onPointerDown(1, 200, 800 * ONE_PLAYER_BUTTON_Y_RATIO, 400, 800);
+    game.onPointerUp(1);
+
+    expect(game.modeSelectActive).toBe(false);
+    expect(game.singlePlayer).toBe(true);
+
+    game.update(2, 400, 800);
+    expect(game.ballVX !== 0 || game.ballVY !== 0).toBe(true);
+  });
+
+  it('leaves singlePlayer false and starts the serve countdown when 2 Player is tapped', () => {
+    const game = reachModeSelect();
+
+    game.onPointerDown(1, 200, 800 * TWO_PLAYER_BUTTON_Y_RATIO, 400, 800);
+    game.onPointerUp(1);
+
+    expect(game.modeSelectActive).toBe(false);
+    expect(game.singlePlayer).toBe(false);
+
+    game.update(2, 400, 800);
+    expect(game.ballVX !== 0 || game.ballVY !== 0).toBe(true);
+  });
+
+  it('ignores taps that miss both mode buttons, staying on the mode-select screen', () => {
+    const game = reachModeSelect();
+
+    game.onPointerDown(1, 200, 400, 400, 800); // above both buttons
+
+    expect(game.modeSelectActive).toBe(true);
+    expect(game.singlePlayer).toBe(false);
+  });
+
+  it('does not move a paddle when a tap on the mode-select screen misses both buttons', () => {
+    const game = reachModeSelect();
+
+    game.onPointerDown(2, 90, 400, 400, 800); // off-center tap, hits neither button
+
+    expect(game.paddle1X).toBe(200);
+    expect(game.paddle2X).toBe(200);
+  });
+
+  it('does not show/hit-test the pause button while the mode-select screen is up', () => {
+    const game = reachModeSelect();
+
+    game.onPointerDown(1, 352, 400, 400, 800); // pause icon's docked coordinates (#79)
+
+    expect(game.paused).toBe(false);
+  });
+
+  it('is selectable again after Quit to Title, clearing the previous choice', () => {
+    const game = reachModeSelect();
+    game.onPointerDown(1, 200, 800 * ONE_PLAYER_BUTTON_Y_RATIO, 400, 800); // taps 1 Player
+    game.onPointerUp(1);
+    game.update(2, 400, 800);
+    expect(game.singlePlayer).toBe(true);
+
+    // Pause > Quit to Title -- pause button docked on the right edge,
+    // vertically centered (#79); Quit to Title is the last of the five
+    // stacked pause-overlay actions (see the "Game pause (#70)" tests).
+    game.onPointerDown(1, 352, 400, 400, 800);
+    game.onPointerUp(1);
+    game.onPointerDown(1, 200, 608, 400, 800);
+    game.onPointerUp(1);
+
+    expect(game.titleScreenActive).toBe(true);
+    expect(game.modeSelectActive).toBe(false);
+    expect(game.singlePlayer).toBe(false);
+
+    game.onPointerDown(1, 200, 400, 400, 800); // dismiss the title screen again
+    game.onPointerDown(1, 200, 800 * 0.43, 400, 800); // picks Earth again
+    game.onPointerUp(1);
+
+    expect(game.modeSelectActive).toBe(true);
+    expect(game.singlePlayer).toBe(false); // reselectable, not sticky
   });
 });
 
@@ -1646,7 +1763,7 @@ describe('Menu button tap areas cover their full visible bounds (#78)', () => {
 
   describe('pause-overlay buttons', () => {
     const PAUSE_BUTTON_X = 352;
-    const PAUSE_BUTTON_Y = 48;
+    const PAUSE_BUTTON_Y = 400;
     const RESUME_RECT = { x: 76, y: 206, w: 248, h: 68 };
     const MAP_RECT = { x: 76, y: 298, w: 248, h: 68 };
     const SETTINGS_RECT = { x: 76, y: 390, w: 248, h: 68 };
@@ -1707,7 +1824,7 @@ describe('Menu button tap areas cover their full visible bounds (#78)', () => {
 
   describe('pause-settings buttons', () => {
     const PAUSE_BUTTON_X = 352;
-    const PAUSE_BUTTON_Y = 48;
+    const PAUSE_BUTTON_Y = 400;
     const SETTINGS_BUTTON_Y = 424;
     const SOUND_TOGGLE_RECT = { x: 76, y: 344, w: 248, h: 68 };
     const BACK_RECT = { x: 76, y: 436, w: 248, h: 68 };
@@ -1738,7 +1855,7 @@ describe('Menu button tap areas cover their full visible bounds (#78)', () => {
   });
 
   describe('the in-match pause icon button', () => {
-    const PAUSE_RECT = { x: 324, y: 20, w: 56, h: 56 };
+    const PAUSE_RECT = { x: 324, y: 372, w: 56, h: 56 };
 
     it.each(corners(PAUSE_RECT))('pauses the match when tapped at (%i, %i)', (x, y) => {
       const game = startGame();
