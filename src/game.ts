@@ -11,6 +11,23 @@ export function clamp(value: number, min: number, max: number): number {
   return value;
 }
 
+type Rect = { x: number; y: number; w: number; h: number };
+
+function rectContains(rect: Rect, x: number, y: number): boolean {
+  return x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h;
+}
+
+// Uniform shrink applied to a menu button's rect while pressed (issue #77):
+// gives tactile "pushed down" feedback since fill/border/icon/label are all
+// derived from the rect passed to each button's render function.
+const PRESSED_BUTTON_SCALE = 0.94;
+
+function shrinkRectForPress(rect: Rect): Rect {
+  const w = rect.w * PRESSED_BUTTON_SCALE;
+  const h = rect.h * PRESSED_BUTTON_SCALE;
+  return { x: rect.x + (rect.w - w) / 2, y: rect.y + (rect.h - h) / 2, w, h };
+}
+
 const PADDLE_WIDTH_RATIO = 0.28; // fraction of canvas width
 const PADDLE_HEIGHT_RATIO = 0.018; // fraction of canvas height
 const PADDLE_MARGIN_RATIO = 0.06; // distance from top/bottom edge, fraction of canvas height
@@ -575,6 +592,14 @@ export class Game {
   pauseMapSelectActive = false; // true while Change Map (#71) is up, shown from within the pause overlay
   pauseSettingsActive = false; // true while Settings (#71) is up, shown from within the pause overlay
   soundEnabled = true; // toggled from Pause > Settings (#71); gates playSound() calls in main.ts, persists for the session
+  // Menu buttons "arm" on pointerdown and only take effect on pointerup, so a
+  // pressed visual can render for the full duration of the hold instead of
+  // being replaced by the resulting screen on the very same event (#77).
+  // pressedButtonKey identifies the armed button (e.g. 'pause-icon' or
+  // 'map-select:0') for render() to compare against; null means no button is
+  // currently pressed.
+  pressedPointerId: number | null = null;
+  pressedButtonKey: string | null = null;
 
   activePowerUp: PowerUp | null = null;
   lastPaddleTouch: PaddleId | null = null; // paddle that most recently hit the ball this rally
@@ -600,6 +625,11 @@ export class Game {
   private lastHeight = 0;
   private lastWidth = 0;
   private readonly pointerPaddle = new Map<number, PaddleId>();
+  // The armed button's rect (for move-off cancellation) and the mutation it
+  // performs once committed on pointerup -- paired with pressedPointerId
+  // above.
+  private pressedButtonRect: Rect | null = null;
+  private pressedCommit: (() => void) | null = null;
 
   private ensureInitialized(width: number, height: number): void {
     if (this.initialized) {
@@ -731,7 +761,7 @@ export class Game {
   // Bounding box of the index-th map-select button (0 = first theme, in
   // `MAP_THEMES` insertion order), shared by hit-testing and rendering so
   // they can never drift apart.
-  private mapButtonRect(index: number, width: number, height: number): { x: number; y: number; w: number; h: number } {
+  private mapButtonRect(index: number, width: number, height: number): Rect {
     const themeCount = Object.keys(MAP_THEMES).length;
     const w = width * MAP_BUTTON_WIDTH_RATIO;
     const h = height * MAP_BUTTON_HEIGHT_RATIO;
@@ -742,19 +772,6 @@ export class Game {
     return { x, y, w, h };
   }
 
-  // Returns the map tapped at (x, y) during the map-select screen, or null
-  // when the tap missed both buttons.
-  private mapAt(x: number, y: number, width: number, height: number): MapId | null {
-    const themes = Object.values(MAP_THEMES);
-    for (let i = 0; i < themes.length; i += 1) {
-      const rect = this.mapButtonRect(i, width, height);
-      if (x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h) {
-        return themes[i].id;
-      }
-    }
-    return null;
-  }
-
   // True only during an active match (never on the title, map-select, or
   // win screens) -- shared by the pause button's visibility/hit-test and its
   // render.
@@ -762,7 +779,7 @@ export class Game {
     return !this.titleScreenActive && !this.mapSelectActive && this.winner === null;
   }
 
-  private pauseButtonRect(width: number, height: number): { x: number; y: number; w: number; h: number } {
+  private pauseButtonRect(width: number, height: number): Rect {
     const size = height * PAUSE_BUTTON_SIZE_RATIO;
     const margin = height * PAUSE_BUTTON_MARGIN_RATIO;
     return { x: width - margin - size, y: margin, w: size, h: size };
@@ -772,14 +789,13 @@ export class Game {
     if (!this.isMatchActive()) {
       return false;
     }
-    const rect = this.pauseButtonRect(width, height);
-    return x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h;
+    return rectContains(this.pauseButtonRect(width, height), x, y);
   }
 
   // Bounding box of the index-th button in a stack of `count` pause-styled
   // action buttons, shared by the pause overlay and the pause-settings
   // screen so their hit-testing and rendering can never drift apart.
-  private stackedActionButtonRect(index: number, count: number, width: number, height: number): { x: number; y: number; w: number; h: number } {
+  private stackedActionButtonRect(index: number, count: number, width: number, height: number): Rect {
     const w = width * PAUSE_OVERLAY_BUTTON_WIDTH_RATIO;
     const h = height * PAUSE_OVERLAY_BUTTON_HEIGHT_RATIO;
     const gap = height * PAUSE_OVERLAY_BUTTON_GAP_RATIO;
@@ -792,38 +808,111 @@ export class Game {
 
   // Bounding box of the index-th pause-overlay action button (0 = Resume, in
   // PAUSE_ACTIONS order), shared by hit-testing and rendering.
-  private pauseOverlayButtonRect(index: number, width: number, height: number): { x: number; y: number; w: number; h: number } {
+  private pauseOverlayButtonRect(index: number, width: number, height: number): Rect {
     return this.stackedActionButtonRect(index, PAUSE_ACTIONS.length, width, height);
-  }
-
-  // Returns the pause-overlay action tapped at (x, y), or null when the tap
-  // missed every button.
-  private pauseActionAt(x: number, y: number, width: number, height: number): PauseAction | null {
-    for (let i = 0; i < PAUSE_ACTIONS.length; i += 1) {
-      const rect = this.pauseOverlayButtonRect(i, width, height);
-      if (x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h) {
-        return PAUSE_ACTIONS[i].action;
-      }
-    }
-    return null;
   }
 
   // Bounding box of the index-th pause-settings action button (0 = the sound
   // toggle, 1 = Back), shared by hit-testing and rendering.
-  private pauseSettingsButtonRect(index: number, width: number, height: number): { x: number; y: number; w: number; h: number } {
+  private pauseSettingsButtonRect(index: number, width: number, height: number): Rect {
     return this.stackedActionButtonRect(index, PAUSE_SETTINGS_ACTIONS.length, width, height);
   }
 
-  // Returns the pause-settings action tapped at (x, y), or null when the tap
-  // missed every button.
-  private pauseSettingsActionAt(x: number, y: number, width: number, height: number): PauseSettingsAction | null {
-    for (let i = 0; i < PAUSE_SETTINGS_ACTIONS.length; i += 1) {
-      const rect = this.pauseSettingsButtonRect(i, width, height);
-      if (x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h) {
-        return PAUSE_SETTINGS_ACTIONS[i].action;
+  // Arms `key`/`rect`/`commit` as the pointer's pressed button: render() can
+  // now show the pressed visual, and the mutation in `commit` only runs once
+  // onPointerUp confirms the pointer is still over the same button (#77).
+  private armButton(pointerId: number, key: string, rect: Rect, commit: () => void): void {
+    this.pressedPointerId = pointerId;
+    this.pressedButtonKey = key;
+    this.pressedButtonRect = rect;
+    this.pressedCommit = commit;
+  }
+
+  private isPressed(key: string): boolean {
+    return this.pressedButtonKey === key;
+  }
+
+  private clearPressedButton(): void {
+    this.pressedPointerId = null;
+    this.pressedButtonKey = null;
+    this.pressedButtonRect = null;
+    this.pressedCommit = null;
+  }
+
+  // Shared by the pre-match map-select flow and Pause > Change Map (#71),
+  // which render/hit-test the exact same button layout but commit to
+  // different fields.
+  private armMapButton(pointerId: number, x: number, y: number, width: number, height: number, screen: 'map-select' | 'pause-map-select'): void {
+    const themes = Object.values(MAP_THEMES);
+    for (let i = 0; i < themes.length; i += 1) {
+      const rect = this.mapButtonRect(i, width, height);
+      if (rectContains(rect, x, y)) {
+        const themeId = themes[i].id;
+        this.armButton(pointerId, `${screen}:${i}`, rect, () => {
+          this.selectedMap = themeId;
+          if (screen === 'map-select') {
+            this.mapSelectActive = false;
+            this.serveDelayRemaining = SERVE_DELAY_SECONDS;
+          } else {
+            // Pause > Change Map (#71): applies the picked map to the
+            // backdrop and returns to the pause overlay (still paused)
+            // without touching score, ball, or power-up state.
+            this.pauseMapSelectActive = false;
+          }
+        });
+        return;
       }
     }
-    return null;
+  }
+
+  private armPauseIconButton(pointerId: number, width: number, height: number): void {
+    this.armButton(pointerId, 'pause-icon', this.pauseButtonRect(width, height), () => {
+      this.paused = true;
+    });
+  }
+
+  private armPauseOverlayButton(pointerId: number, x: number, y: number, width: number, height: number): void {
+    for (let i = 0; i < PAUSE_ACTIONS.length; i += 1) {
+      const rect = this.pauseOverlayButtonRect(i, width, height);
+      if (rectContains(rect, x, y)) {
+        const action = PAUSE_ACTIONS[i].action;
+        this.armButton(pointerId, `pause-overlay:${i}`, rect, () => {
+          if (action === 'resume') {
+            this.paused = false;
+          } else if (action === 'map') {
+            this.pauseMapSelectActive = true;
+          } else if (action === 'settings') {
+            this.pauseSettingsActive = true;
+          } else if (action === 'restart') {
+            this.paused = false;
+            this.restartMatch(width, height);
+          } else if (action === 'quit') {
+            this.paused = false;
+            this.quitToTitle();
+          }
+        });
+        return;
+      }
+    }
+  }
+
+  // Pause > Settings (#71): toggles session-scoped options or returns to the
+  // pause overlay, without touching match state.
+  private armPauseSettingsButton(pointerId: number, x: number, y: number, width: number, height: number): void {
+    for (let i = 0; i < PAUSE_SETTINGS_ACTIONS.length; i += 1) {
+      const rect = this.pauseSettingsButtonRect(i, width, height);
+      if (rectContains(rect, x, y)) {
+        const action = PAUSE_SETTINGS_ACTIONS[i].action;
+        this.armButton(pointerId, `pause-settings:${i}`, rect, () => {
+          if (action === 'toggle-sound') {
+            this.soundEnabled = !this.soundEnabled;
+          } else if (action === 'back') {
+            this.pauseSettingsActive = false;
+          }
+        });
+        return;
+      }
+    }
   }
 
   onPointerDown(pointerId: number, x: number, y: number, width: number, height: number): void {
@@ -834,51 +923,19 @@ export class Game {
       return;
     }
     if (this.mapSelectActive) {
-      const chosen = this.mapAt(x, y, width, height);
-      if (chosen !== null) {
-        this.selectedMap = chosen;
-        this.mapSelectActive = false;
-        this.serveDelayRemaining = SERVE_DELAY_SECONDS;
-      }
+      this.armMapButton(pointerId, x, y, width, height, 'map-select');
       return;
     }
-    // Pause > Change Map (#71): applies the picked map to the backdrop and
-    // returns to the pause overlay (still paused) without touching score,
-    // ball, or power-up state -- unlike the pre-match map-select flow above.
     if (this.pauseMapSelectActive) {
-      const chosen = this.mapAt(x, y, width, height);
-      if (chosen !== null) {
-        this.selectedMap = chosen;
-        this.pauseMapSelectActive = false;
-      }
+      this.armMapButton(pointerId, x, y, width, height, 'pause-map-select');
       return;
     }
-    // Pause > Settings (#71): toggles session-scoped options or returns to
-    // the pause overlay, without touching match state.
     if (this.pauseSettingsActive) {
-      const action = this.pauseSettingsActionAt(x, y, width, height);
-      if (action === 'toggle-sound') {
-        this.soundEnabled = !this.soundEnabled;
-      } else if (action === 'back') {
-        this.pauseSettingsActive = false;
-      }
+      this.armPauseSettingsButton(pointerId, x, y, width, height);
       return;
     }
     if (this.paused) {
-      const action = this.pauseActionAt(x, y, width, height);
-      if (action === 'resume') {
-        this.paused = false;
-      } else if (action === 'map') {
-        this.pauseMapSelectActive = true;
-      } else if (action === 'settings') {
-        this.pauseSettingsActive = true;
-      } else if (action === 'restart') {
-        this.paused = false;
-        this.restartMatch(width, height);
-      } else if (action === 'quit') {
-        this.paused = false;
-        this.quitToTitle();
-      }
+      this.armPauseOverlayButton(pointerId, x, y, width, height);
       return;
     }
     if (this.winner !== null) {
@@ -886,7 +943,7 @@ export class Game {
       return;
     }
     if (this.pauseButtonAt(x, y, width, height)) {
-      this.paused = true;
+      this.armPauseIconButton(pointerId, width, height);
       return;
     }
     const paddle: PaddleId = y < height / 2 ? 1 : 2;
@@ -894,7 +951,16 @@ export class Game {
     this.movePaddle(paddle, x, width);
   }
 
-  onPointerMove(pointerId: number, x: number, width: number): void {
+  // `y` is optional so paddle-drag callers (which only ever move
+  // horizontally) don't need to supply it; it's required to detect a held
+  // menu button's pointer moving off it, which cancels the press (#77).
+  onPointerMove(pointerId: number, x: number, width: number, y?: number): void {
+    if (this.pressedPointerId === pointerId) {
+      if (y !== undefined && this.pressedButtonRect !== null && !rectContains(this.pressedButtonRect, x, y)) {
+        this.clearPressedButton();
+      }
+      return;
+    }
     if (this.paused) {
       return;
     }
@@ -906,6 +972,23 @@ export class Game {
   }
 
   onPointerUp(pointerId: number): void {
+    if (this.pressedPointerId === pointerId) {
+      const commit = this.pressedCommit;
+      this.clearPressedButton();
+      commit?.();
+      return;
+    }
+    this.pointerPaddle.delete(pointerId);
+  }
+
+  // Distinct from onPointerUp so a cancelled touch (e.g. the OS taking over
+  // the gesture) reverts the pressed visual without committing the button's
+  // action -- see acceptance criteria on #77.
+  onPointerCancel(pointerId: number): void {
+    if (this.pressedPointerId === pointerId) {
+      this.clearPressedButton();
+      return;
+    }
     this.pointerPaddle.delete(pointerId);
   }
 
@@ -1936,8 +2019,12 @@ export class Game {
   private renderMapCard(
     ctx: CanvasRenderingContext2D,
     theme: MapTheme,
-    rect: { x: number; y: number; w: number; h: number },
+    rect: Rect,
+    pressed: boolean,
   ): void {
+    if (pressed) {
+      rect = shrinkRectForPress(rect);
+    }
     const centerY = rect.y + rect.h / 2;
     const radius = rect.h * 0.25;
 
@@ -1948,7 +2035,9 @@ export class Game {
     fill.addColorStop(0, theme.backgroundColor);
     fill.addColorStop(1, 'rgba(10, 17, 40, 0.92)');
     ctx.fillStyle = fill;
+    ctx.globalAlpha = pressed ? 0.8 : 1;
     ctx.fill();
+    ctx.globalAlpha = 1;
     ctx.shadowColor = `rgba(${theme.starGlowRgb}, 0.45)`;
     ctx.shadowBlur = rect.h * 0.3;
     ctx.strokeStyle = 'rgba(232, 236, 245, 0.4)';
@@ -2002,6 +2091,7 @@ export class Game {
     ctx.fillStyle = 'rgba(10, 17, 40, 0.55)';
     ctx.fillRect(0, 0, width, height);
 
+    const screen = this.pauseMapSelectActive ? 'pause-map-select' : 'map-select';
     const themes = Object.values(MAP_THEMES);
     const firstRect = this.mapButtonRect(0, width, height);
     const lastRect = this.mapButtonRect(themes.length - 1, width, height);
@@ -2027,7 +2117,7 @@ export class Game {
 
     themes.forEach((theme, i) => {
       const rect = this.mapButtonRect(i, width, height);
-      this.renderMapCard(ctx, theme, rect);
+      this.renderMapCard(ctx, theme, rect, this.isPressed(`${screen}:${i}`));
     });
   }
 
@@ -2035,7 +2125,8 @@ export class Game {
   // bars, tucked in the top-right corner. Purely visual -- hit-testing lives
   // in pauseButtonAt/pauseButtonRect above so they can never drift apart.
   private renderPauseButton(ctx: CanvasRenderingContext2D, width: number, height: number): void {
-    const rect = this.pauseButtonRect(width, height);
+    const pressed = this.isPressed('pause-icon');
+    const rect = pressed ? shrinkRectForPress(this.pauseButtonRect(width, height)) : this.pauseButtonRect(width, height);
     const centerX = rect.x + rect.w / 2;
     const centerY = rect.y + rect.h / 2;
     const radius = rect.h * 0.28;
@@ -2043,7 +2134,7 @@ export class Game {
     ctx.save();
     ctx.beginPath();
     ctx.roundRect(rect.x, rect.y, rect.w, rect.h, radius);
-    ctx.fillStyle = 'rgba(10, 17, 40, 0.55)';
+    ctx.fillStyle = pressed ? 'rgba(10, 17, 40, 0.8)' : 'rgba(10, 17, 40, 0.55)';
     ctx.fill();
     ctx.strokeStyle = 'rgba(232, 236, 245, 0.4)';
     ctx.lineWidth = Math.max(1, rect.h * 0.04);
@@ -2061,7 +2152,10 @@ export class Game {
   // Draws one pause-overlay action button as a themed card -- gradient fill
   // plus glowing border, matching renderMapCard's treatment -- with a plain
   // centered label instead of a map icon.
-  private renderPauseActionButton(ctx: CanvasRenderingContext2D, label: string, rect: { x: number; y: number; w: number; h: number }): void {
+  private renderPauseActionButton(ctx: CanvasRenderingContext2D, label: string, rect: Rect, pressed: boolean): void {
+    if (pressed) {
+      rect = shrinkRectForPress(rect);
+    }
     const centerX = rect.x + rect.w / 2;
     const centerY = rect.y + rect.h / 2;
     const radius = rect.h * 0.25;
@@ -2073,7 +2167,9 @@ export class Game {
     fill.addColorStop(0, 'rgba(232, 236, 245, 0.14)');
     fill.addColorStop(1, 'rgba(10, 17, 40, 0.92)');
     ctx.fillStyle = fill;
+    ctx.globalAlpha = pressed ? 0.8 : 1;
     ctx.fill();
+    ctx.globalAlpha = 1;
     ctx.strokeStyle = 'rgba(232, 236, 245, 0.4)';
     ctx.lineWidth = Math.max(1, rect.h * 0.035);
     ctx.stroke();
@@ -2116,7 +2212,7 @@ export class Game {
 
     PAUSE_ACTIONS.forEach((entry, i) => {
       const rect = this.pauseOverlayButtonRect(i, width, height);
-      this.renderPauseActionButton(ctx, entry.label, rect);
+      this.renderPauseActionButton(ctx, entry.label, rect, this.isPressed(`pause-overlay:${i}`));
     });
   }
 
@@ -2147,8 +2243,8 @@ export class Game {
     ctx.fillText('Settings', width / 2, headingY);
     ctx.restore();
 
-    this.renderPauseActionButton(ctx, `Sound: ${this.soundEnabled ? 'On' : 'Off'}`, firstRect);
-    this.renderPauseActionButton(ctx, 'Back', lastRect);
+    this.renderPauseActionButton(ctx, `Sound: ${this.soundEnabled ? 'On' : 'Off'}`, firstRect, this.isPressed('pause-settings:0'));
+    this.renderPauseActionButton(ctx, 'Back', lastRect, this.isPressed('pause-settings:1'));
   }
 
   render(ctx: CanvasRenderingContext2D, width: number, height: number): void {

@@ -38,7 +38,7 @@ canvas.addEventListener('pointerdown', (event) => {
 });
 
 canvas.addEventListener('pointermove', (event) => {
-  game.onPointerMove(event.pointerId, event.clientX, window.innerWidth);
+  game.onPointerMove(event.pointerId, event.clientX, window.innerWidth, event.clientY);
 });
 
 canvas.addEventListener('pointerup', (event) => {
@@ -46,7 +46,7 @@ canvas.addEventListener('pointerup', (event) => {
 });
 
 canvas.addEventListener('pointercancel', (event) => {
-  game.onPointerUp(event.pointerId);
+  game.onPointerCancel(event.pointerId);
 });
 
 let last = performance.now();

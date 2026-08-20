@@ -26,6 +26,7 @@ function startGame(width = 400, height = 800): Game {
   game.update(0, width, height); // initializes, shows the title screen
   game.onPointerDown(-1, width / 2, height / 2, width, height); // dismiss the title screen, shows map-select
   game.onPointerDown(-1, width / 2, height * 0.43, width, height); // taps the Earth button, starts the first-serve countdown
+  game.onPointerUp(-1);
   game.update(2, width, height); // clears the pre-serve pause and serves the ball
   return game;
 }
@@ -138,6 +139,7 @@ describe('Game title screen', () => {
     expect(game.ballVY).toBe(0);
 
     game.onPointerDown(1, 200, 800 * 0.43, 400, 800); // taps the Earth button
+    game.onPointerUp(1);
 
     expect(game.mapSelectActive).toBe(false);
     expect(game.selectedMap).toBe('earth');
@@ -201,6 +203,7 @@ describe('Game map select', () => {
     game.onPointerDown(1, 200, 400, 400, 800); // dismiss the title screen
 
     game.onPointerDown(1, 200, 800 * EARTH_BUTTON_Y_RATIO, 400, 800);
+    game.onPointerUp(1);
 
     expect(game.mapSelectActive).toBe(false);
     expect(game.selectedMap).toBe('earth');
@@ -215,6 +218,7 @@ describe('Game map select', () => {
     game.onPointerDown(1, 200, 400, 400, 800); // dismiss the title screen
 
     game.onPointerDown(1, 200, 800 * MARS_BUTTON_Y_RATIO, 400, 800);
+    game.onPointerUp(1);
 
     expect(game.mapSelectActive).toBe(false);
     expect(game.selectedMap).toBe('mars');
@@ -229,6 +233,7 @@ describe('Game map select', () => {
     game.onPointerDown(1, 200, 400, 400, 800); // dismiss the title screen
 
     game.onPointerDown(1, 90, 800 * EARTH_BUTTON_Y_RATIO, 400, 800); // near left edge of Earth's button
+    game.onPointerUp(1);
 
     expect(game.selectedMap).toBe('earth');
     expect(game.paddle1X).toBe(200);
@@ -240,6 +245,7 @@ describe('Game map select', () => {
     game.onPointerDown(1, 200, 400, 400, 800); // dismiss the title screen
 
     game.onPointerDown(1, 90, 800 * MARS_BUTTON_Y_RATIO, 400, 800); // near left edge of Mars's button
+    game.onPointerUp(1);
 
     expect(game.selectedMap).toBe('mars');
     expect(game.paddle2X).toBe(200);
@@ -292,6 +298,7 @@ describe('Game map select', () => {
     marsGame.update(0, 400, 800);
     marsGame.onPointerDown(1, 200, 400, 400, 800);
     marsGame.onPointerDown(1, 200, 800 * MARS_BUTTON_Y_RATIO, 400, 800);
+    marsGame.onPointerUp(1);
     marsGame.update(2, 400, 800);
 
     const earthSpeed = Math.hypot(earthGame.ballVX, earthGame.ballVY);
@@ -1213,6 +1220,7 @@ describe('Game pause (#70)', () => {
     const game = startGame();
 
     game.onPointerDown(1, PAUSE_BUTTON_X, PAUSE_BUTTON_Y, 400, 800);
+    game.onPointerUp(1);
 
     expect(game.paused).toBe(true);
   });
@@ -1237,6 +1245,7 @@ describe('Game pause (#70)', () => {
     const game = startGame();
     const { ballX, ballY, ballVX, ballVY } = game;
     game.onPointerDown(1, PAUSE_BUTTON_X, PAUSE_BUTTON_Y, 400, 800);
+    game.onPointerUp(1);
 
     game.update(1, 400, 800);
 
@@ -1249,6 +1258,7 @@ describe('Game pause (#70)', () => {
   it('freezes the power-up spawn timer while paused', () => {
     const game = startGame();
     game.onPointerDown(1, PAUSE_BUTTON_X, PAUSE_BUTTON_Y, 400, 800);
+    game.onPointerUp(1);
 
     game.update(POWER_UP_SPAWN_INTERVAL_SECONDS + 1, 400, 800); // would spawn one if unpaused
 
@@ -1260,6 +1270,7 @@ describe('Game pause (#70)', () => {
     game.onPointerDown(2, 50, 700, 400, 800); // starts dragging paddle 2
     const paddle2XBeforePause = game.paddle2X;
     game.onPointerDown(1, PAUSE_BUTTON_X, PAUSE_BUTTON_Y, 400, 800); // pauses with a second pointer
+    game.onPointerUp(1);
 
     game.onPointerMove(2, 350, 400);
 
@@ -1274,9 +1285,11 @@ describe('Game pause (#70)', () => {
     game.score2 = 5;
     const { ballX, ballY, ballVX, ballVY } = game;
     game.onPointerDown(1, PAUSE_BUTTON_X, PAUSE_BUTTON_Y, 400, 800);
+    game.onPointerUp(1);
     game.update(2, 400, 800); // frozen while paused
 
     game.onPointerDown(1, RESUME_BUTTON_X, RESUME_BUTTON_Y, 400, 800);
+    game.onPointerUp(1);
 
     expect(game.paused).toBe(false);
     expect(game.score1).toBe(3);
@@ -1294,8 +1307,10 @@ describe('Game pause (#70)', () => {
     game.score2 = 5;
     game.activePowerUp = { id: 1, kind: 'fast-ball', x: game.ballX, y: game.ballY };
     game.onPointerDown(1, PAUSE_BUTTON_X, PAUSE_BUTTON_Y, 400, 800);
+    game.onPointerUp(1);
 
     game.onPointerDown(1, RESUME_BUTTON_X, RESTART_BUTTON_Y, 400, 800);
+    game.onPointerUp(1);
 
     expect(game.paused).toBe(false);
     expect(game.score1).toBe(0);
@@ -1310,8 +1325,10 @@ describe('Game pause (#70)', () => {
     game.score1 = 3;
     game.score2 = 5;
     game.onPointerDown(1, PAUSE_BUTTON_X, PAUSE_BUTTON_Y, 400, 800);
+    game.onPointerUp(1);
 
     game.onPointerDown(1, RESUME_BUTTON_X, QUIT_BUTTON_Y, 400, 800);
+    game.onPointerUp(1);
 
     expect(game.paused).toBe(false);
     expect(game.titleScreenActive).toBe(true);
@@ -1342,6 +1359,7 @@ describe('Game pause > Change Map and Settings (#71)', () => {
 
   function pause(game: Game): void {
     game.onPointerDown(1, PAUSE_BUTTON_X, PAUSE_BUTTON_Y, 400, 800);
+    game.onPointerUp(1);
   }
 
   it('opens the map-select screen, still paused, when Change Map is tapped', () => {
@@ -1349,6 +1367,7 @@ describe('Game pause > Change Map and Settings (#71)', () => {
     pause(game);
 
     game.onPointerDown(1, RESUME_BUTTON_X, CHANGE_MAP_BUTTON_Y, 400, 800);
+    game.onPointerUp(1);
 
     expect(game.paused).toBe(true);
     expect(game.pauseMapSelectActive).toBe(true);
@@ -1362,8 +1381,10 @@ describe('Game pause > Change Map and Settings (#71)', () => {
     const { ballX, ballY, ballVX, ballVY } = game;
     pause(game);
     game.onPointerDown(1, RESUME_BUTTON_X, CHANGE_MAP_BUTTON_Y, 400, 800);
+    game.onPointerUp(1);
 
     game.onPointerDown(1, 200, MARS_BUTTON_Y, 400, 800);
+    game.onPointerUp(1);
 
     expect(game.selectedMap).toBe('mars');
     expect(game.pauseMapSelectActive).toBe(false);
@@ -1381,6 +1402,7 @@ describe('Game pause > Change Map and Settings (#71)', () => {
     const game = startGame();
     pause(game);
     game.onPointerDown(1, RESUME_BUTTON_X, CHANGE_MAP_BUTTON_Y, 400, 800);
+    game.onPointerUp(1);
     const { ballX, ballY } = game;
 
     game.update(2, 400, 800);
@@ -1393,6 +1415,7 @@ describe('Game pause > Change Map and Settings (#71)', () => {
     const game = startGame(); // picks Earth
     pause(game);
     game.onPointerDown(1, RESUME_BUTTON_X, CHANGE_MAP_BUTTON_Y, 400, 800);
+    game.onPointerUp(1);
 
     game.onPointerDown(1, 200, 400, 400, 800); // dead center, between the two buttons
 
@@ -1405,6 +1428,7 @@ describe('Game pause > Change Map and Settings (#71)', () => {
     pause(game);
 
     game.onPointerDown(1, RESUME_BUTTON_X, SETTINGS_BUTTON_Y, 400, 800);
+    game.onPointerUp(1);
 
     expect(game.paused).toBe(true);
     expect(game.pauseSettingsActive).toBe(true);
@@ -1420,14 +1444,17 @@ describe('Game pause > Change Map and Settings (#71)', () => {
     game.score1 = 3;
     pause(game);
     game.onPointerDown(1, RESUME_BUTTON_X, SETTINGS_BUTTON_Y, 400, 800);
+    game.onPointerUp(1);
 
     game.onPointerDown(1, RESUME_BUTTON_X, SOUND_TOGGLE_BUTTON_Y, 400, 800);
+    game.onPointerUp(1);
 
     expect(game.soundEnabled).toBe(false);
     expect(game.pauseSettingsActive).toBe(true); // stays on the settings screen after toggling
     expect(game.score1).toBe(3);
 
     game.onPointerDown(1, RESUME_BUTTON_X, SOUND_TOGGLE_BUTTON_Y, 400, 800);
+    game.onPointerUp(1);
     expect(game.soundEnabled).toBe(true);
   });
 
@@ -1435,8 +1462,10 @@ describe('Game pause > Change Map and Settings (#71)', () => {
     const game = startGame();
     pause(game);
     game.onPointerDown(1, RESUME_BUTTON_X, SETTINGS_BUTTON_Y, 400, 800);
+    game.onPointerUp(1);
 
     game.onPointerDown(1, RESUME_BUTTON_X, SETTINGS_BACK_BUTTON_Y, 400, 800);
+    game.onPointerUp(1);
 
     expect(game.pauseSettingsActive).toBe(false);
     expect(game.paused).toBe(true);
@@ -1446,21 +1475,116 @@ describe('Game pause > Change Map and Settings (#71)', () => {
     const game = startGame();
     pause(game);
     game.onPointerDown(1, RESUME_BUTTON_X, SETTINGS_BUTTON_Y, 400, 800);
+    game.onPointerUp(1);
     game.onPointerDown(1, RESUME_BUTTON_X, SOUND_TOGGLE_BUTTON_Y, 400, 800);
+    game.onPointerUp(1);
     expect(game.soundEnabled).toBe(false);
     game.onPointerDown(1, RESUME_BUTTON_X, SETTINGS_BACK_BUTTON_Y, 400, 800);
+    game.onPointerUp(1);
 
     game.onPointerDown(1, RESUME_BUTTON_X, 240, 400, 800); // taps Resume
+    game.onPointerUp(1);
 
     expect(game.paused).toBe(false);
     expect(game.soundEnabled).toBe(false);
 
     pause(game);
     game.onPointerDown(1, RESUME_BUTTON_X, 516, 400, 800); // taps Restart Match
+    game.onPointerUp(1);
     expect(game.soundEnabled).toBe(false);
 
     pause(game);
     game.onPointerDown(1, RESUME_BUTTON_X, 608, 400, 800); // taps Quit to Title
+    game.onPointerUp(1);
     expect(game.soundEnabled).toBe(false);
+  });
+});
+
+describe('Game menu button press feedback (#77)', () => {
+  const PAUSE_BUTTON_X = 352;
+  const PAUSE_BUTTON_Y = 48;
+  const EARTH_BUTTON_Y = 800 * 0.43;
+
+  it('arms a menu button on pointerdown without committing its action until release', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.onPointerDown(1, 200, 400, 400, 800); // dismiss the title screen
+    game.onPointerUp(1);
+
+    game.onPointerDown(1, 200, EARTH_BUTTON_Y, 400, 800); // press, don't release yet
+
+    expect(game.pressedPointerId).toBe(1);
+    expect(game.pressedButtonKey).toBe('map-select:0');
+    expect(game.mapSelectActive).toBe(true); // action not yet committed
+    expect(game.selectedMap).toBeNull();
+
+    game.onPointerUp(1);
+
+    expect(game.pressedPointerId).toBeNull();
+    expect(game.pressedButtonKey).toBeNull();
+    expect(game.mapSelectActive).toBe(false);
+    expect(game.selectedMap).toBe('earth');
+  });
+
+  it('cancels the press without committing the action on pointercancel', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.onPointerDown(1, 200, 400, 400, 800);
+    game.onPointerUp(1);
+
+    game.onPointerDown(1, 200, EARTH_BUTTON_Y, 400, 800);
+    game.onPointerCancel(1);
+
+    expect(game.pressedButtonKey).toBeNull();
+    expect(game.mapSelectActive).toBe(true);
+    expect(game.selectedMap).toBeNull();
+  });
+
+  it('cancels the press when the pointer moves off the button before release', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.onPointerDown(1, 200, 400, 400, 800);
+    game.onPointerUp(1);
+
+    game.onPointerDown(1, 200, EARTH_BUTTON_Y, 400, 800);
+    game.onPointerMove(1, 200, 400, 10); // well above the button's rect
+
+    expect(game.pressedButtonKey).toBeNull();
+
+    game.onPointerUp(1);
+
+    expect(game.mapSelectActive).toBe(true); // never committed
+    expect(game.selectedMap).toBeNull();
+  });
+
+  it('keeps the press armed while the pointer stays within the button', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.onPointerDown(1, 200, 400, 400, 800);
+    game.onPointerUp(1);
+
+    game.onPointerDown(1, 200, EARTH_BUTTON_Y, 400, 800);
+    game.onPointerMove(1, 205, 400, EARTH_BUTTON_Y); // small jitter, still over the same button
+
+    expect(game.pressedButtonKey).toBe('map-select:0');
+  });
+
+  it('tracks the pause icon as pressed while held, independently of paddle dragging by another pointer', () => {
+    const game = startGame();
+    const paddle1XBefore = game.paddle1X;
+
+    game.onPointerDown(1, PAUSE_BUTTON_X, PAUSE_BUTTON_Y, 400, 800); // press, don't release yet
+
+    expect(game.pressedButtonKey).toBe('pause-icon');
+    expect(game.paused).toBe(false); // not yet committed
+
+    game.onPointerDown(2, 100, 50, 400, 800); // a second pointer drags paddle 1
+    game.onPointerMove(2, 150, 400);
+
+    expect(game.paddle1X).not.toBe(paddle1XBefore);
+    expect(game.pressedButtonKey).toBe('pause-icon'); // unaffected by the other pointer
+
+    game.onPointerUp(1);
+    expect(game.paused).toBe(true);
   });
 });
