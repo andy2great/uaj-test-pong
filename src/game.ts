@@ -361,10 +361,11 @@ const MAP_BUTTON_GAP_RATIO = 0.04; // fraction of canvas height, between buttons
 
 // Pause button (#70): a small tappable icon shown only during an active
 // match (never on title/map-select/win screens), sized as a comfortable
-// one-thumb tap target and tucked in the top-right corner, clear of the HUD
-// score panels.
+// one-thumb tap target. Docked on the right edge, vertically centered (#79)
+// so it sits clear of both paddles' full-height touch/drag zones instead of
+// inside the top player's.
 const PAUSE_BUTTON_SIZE_RATIO = 0.07; // fraction of canvas height
-const PAUSE_BUTTON_MARGIN_RATIO = 0.025; // distance from the top/right edge, fraction of canvas height
+const PAUSE_BUTTON_MARGIN_RATIO = 0.025; // distance from the right edge, fraction of canvas height
 
 // Pause overlay (#70): three stacked, thumb-reachable action buttons --
 // Resume, Restart Match, Quit to Title -- styled like the map-select cards
@@ -782,7 +783,7 @@ export class Game {
   private pauseButtonRect(width: number, height: number): Rect {
     const size = height * PAUSE_BUTTON_SIZE_RATIO;
     const margin = height * PAUSE_BUTTON_MARGIN_RATIO;
-    return { x: width - margin - size, y: margin, w: size, h: size };
+    return { x: width - margin - size, y: height / 2 - size / 2, w: size, h: size };
   }
 
   private pauseButtonAt(x: number, y: number, width: number, height: number): boolean {
@@ -2134,8 +2135,9 @@ export class Game {
   }
 
   // Draws the pause button: a rounded translucent icon showing two vertical
-  // bars, tucked in the top-right corner. Purely visual -- hit-testing lives
-  // in pauseButtonAt/pauseButtonRect above so they can never drift apart.
+  // bars, docked on the right edge, vertically centered (#79). Purely visual
+  // -- hit-testing lives in pauseButtonAt/pauseButtonRect above so they can
+  // never drift apart.
   private renderPauseButton(ctx: CanvasRenderingContext2D, width: number, height: number): void {
     const pressed = this.isPressed('pause-icon');
     const rect = pressed ? shrinkRectForPress(this.pauseButtonRect(width, height)) : this.pauseButtonRect(width, height);

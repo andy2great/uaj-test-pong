@@ -1199,8 +1199,9 @@ describe('Game pause (#70)', () => {
   // The pause button and the five overlay action buttons are all ratios of
   // width/height alone (see their *Ratio constants in game.ts), so these
   // hold for any canvas size at the default 400x800 used by startGame.
+  // Pause button is docked on the right edge, vertically centered (#79).
   const PAUSE_BUTTON_X = 352;
-  const PAUSE_BUTTON_Y = 48;
+  const PAUSE_BUTTON_Y = 400;
   const RESUME_BUTTON_X = 200;
   const RESUME_BUTTON_Y = 240;
   const RESTART_BUTTON_Y = 516;
@@ -1343,8 +1344,9 @@ describe('Game pause (#70)', () => {
 });
 
 describe('Game pause > Change Map and Settings (#71)', () => {
+  // Pause button is docked on the right edge, vertically centered (#79).
   const PAUSE_BUTTON_X = 352;
-  const PAUSE_BUTTON_Y = 48;
+  const PAUSE_BUTTON_Y = 400;
   const RESUME_BUTTON_X = 200;
   const CHANGE_MAP_BUTTON_Y = 332;
   const SETTINGS_BUTTON_Y = 424;
@@ -1501,8 +1503,9 @@ describe('Game pause > Change Map and Settings (#71)', () => {
 });
 
 describe('Game menu button press feedback (#77)', () => {
+  // Pause button is docked on the right edge, vertically centered (#79).
   const PAUSE_BUTTON_X = 352;
-  const PAUSE_BUTTON_Y = 48;
+  const PAUSE_BUTTON_Y = 400;
   const EARTH_BUTTON_Y = 800 * 0.43;
 
   it('arms a menu button on pointerdown without committing its action until release', () => {
