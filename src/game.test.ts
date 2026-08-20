@@ -126,6 +126,21 @@ describe('Game title screen', () => {
     expect(game.ballVX !== 0 || game.ballVY !== 0).toBe(true);
   });
 
+  it('does not also register as a map pick when the dismissing tap lands on the "Tap to start" text', () => {
+    const game = new Game();
+    const width = 400;
+    const height = 800;
+    game.update(0, width, height);
+
+    // Matches the exact spot where "Tap to start" is rendered, which overlaps
+    // the Mars button's hit-region on the map-select screen (issue #63).
+    game.onPointerDown(1, width / 2, height / 2 + height * 0.04, width, height);
+
+    expect(game.titleScreenActive).toBe(false);
+    expect(game.mapSelectActive).toBe(true);
+    expect(game.selectedMap).toBeNull();
+  });
+
   it('does not reappear after a match win and reset', () => {
     const game = startGame();
 
@@ -271,13 +286,13 @@ describe('Game paddle control', () => {
   });
 
   it('moves player 2 paddle on a touch in the bottom half', () => {
-    const game = new Game();
+    const game = startGame();
     game.onPointerDown(1, 300, 700, 400, 800);
     expect(game.paddle2X).toBe(300);
   });
 
   it('clamps paddle position to the canvas width', () => {
-    const game = new Game();
+    const game = startGame();
     game.onPointerDown(1, -1000, 50, 400, 800);
     expect(game.paddle1X).toBeCloseTo(56); // half the paddle width (0.28 * 400 / 2)
 
@@ -286,7 +301,7 @@ describe('Game paddle control', () => {
   });
 
   it('tracks independent pointers for each paddle simultaneously', () => {
-    const game = new Game();
+    const game = startGame();
     game.onPointerDown(1, 100, 50, 400, 800); // player 1, top half
     game.onPointerDown(2, 300, 750, 400, 800); // player 2, bottom half
     expect(game.paddle1X).toBe(100);
@@ -305,7 +320,7 @@ describe('Game paddle control', () => {
   });
 
   it('stops tracking a pointer after pointerup', () => {
-    const game = new Game();
+    const game = startGame();
     game.onPointerDown(1, 100, 50, 400, 800);
     game.onPointerUp(1);
     game.onPointerMove(1, 350, 400);
@@ -604,8 +619,7 @@ describe('Game power-ups', () => {
   });
 
   it('increases how far a drag can move the boosted paddle in a single move event', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     game.onPointerDown(1, 200, 50, 400, 800); // registers the pointer as controlling paddle 1
 
     game.paddle1X = 0; // simulate the paddle sitting at the far left edge
@@ -626,8 +640,7 @@ describe('Game power-ups', () => {
     // Regression test for #53: PADDLE_MOVE_STEP_RATIO must be low enough to
     // actually bind during a real drag, otherwise the Speed Boost multiplier
     // scales a cap that was never the bottleneck and has no visible effect.
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     game.onPointerDown(1, 200, 50, 400, 800);
 
     game.paddle1X = 0;
@@ -636,8 +649,7 @@ describe('Game power-ups', () => {
   });
 
   it('lets a boosted paddle cross the canvas in noticeably fewer drag events than baseline', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     game.onPointerDown(1, 200, 50, 400, 800);
 
     // 340 sits within the paddle's reachable range (it is clamped to keep the
@@ -664,8 +676,7 @@ describe('Game power-ups', () => {
   });
 
   it('does not clamp small, normal-speed drag deltas, so baseline dragging still tracks the finger 1:1', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
     game.onPointerDown(1, 200, 50, 400, 800);
 
     game.onPointerMove(1, 210, 400); // a small, realistic per-event delta from continuous dragging
@@ -897,8 +908,7 @@ describe('Game power-ups', () => {
   });
 
   it('keeps the wider paddle further from the canvas edge when clamped', () => {
-    const game = new Game();
-    game.update(0, 400, 800);
+    const game = startGame();
 
     game.onPointerDown(1, -1000, 50, 400, 800);
     const clampedNormal = game.paddle1X;
