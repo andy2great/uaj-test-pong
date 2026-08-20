@@ -56,7 +56,9 @@ function frame(now: number): void {
   game.update(dt, window.innerWidth, window.innerHeight);
   for (const event of game.consumeHapticEvents()) {
     vibrate(event);
-    playSound(event);
+    if (game.soundEnabled) {
+      playSound(event);
+    }
   }
   game.render(ctx, window.innerWidth, window.innerHeight);
   requestAnimationFrame(frame);
