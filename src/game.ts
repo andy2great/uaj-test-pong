@@ -78,10 +78,10 @@ const SCREEN_SHAKE_AMPLITUDE_RATIO = 0.012; // peak offset, fraction of canvas h
 const SERVE_COUNTDOWN_RING_MAX_RADIUS_RATIO = 6; // ring's starting radius, multiple of ball radius
 const SERVE_COUNTDOWN_RING_LINE_WIDTH_RATIO = 0.35; // ring stroke width, multiple of ball radius
 
-// Paddle buff indicators: purely cosmetic bars drawn on the outer side of a
-// buffed paddle, read from `speedBoostRemaining*`/`giantPaddleRemaining*` and
-// scaled against the matching *_DURATION_SECONDS constant. They never feed
-// back into `paddleSpeedMultiplier*`/`paddleWidthMultiplier*` or collisions.
+// Paddle buff/debuff indicators: purely cosmetic bars drawn on the outer side
+// of an affected paddle, read from `freezeRemaining*`/`giantPaddleRemaining*`
+// and scaled against the matching *_DURATION_SECONDS constant. They never
+// feed back into `paddleSpeedMultiplier*`/`paddleWidthMultiplier*` or collisions.
 const BUFF_INDICATOR_HEIGHT_RATIO = 0.4; // bar thickness, multiple of paddle height
 const BUFF_INDICATOR_GAP_RATIO = 1.6; // gap from paddle edge to first bar, multiple of paddle height
 const BUFF_INDICATOR_SPACING_RATIO = 1.2; // gap between stacked bars, multiple of paddle height
@@ -137,8 +137,8 @@ const POWER_UP_PULSE_SPEED = 2.6; // radians/sec
 const POWER_UP_PULSE_SCALE_RATIO = 0.1; // +/- fraction of radius the pickup breathes by
 const POWER_UP_BOB_SPEED = 1.7; // radians/sec
 const POWER_UP_BOB_RATIO = 0.3; // bob amplitude, multiple of pickup radius
-export const SPEED_BOOST_MULTIPLIER = 1.6;
-export const SPEED_BOOST_DURATION_SECONDS = 5;
+export const FREEZE_PADDLE_MULTIPLIER = 0.4; // fraction of normal paddle speed while frozen
+export const FREEZE_PADDLE_DURATION_SECONDS = 4;
 export const FAST_BALL_MULTIPLIER = 1.35;
 export const GIANT_PADDLE_MULTIPLIER = 1.8;
 export const GIANT_PADDLE_DURATION_SECONDS = 5;
@@ -432,7 +432,7 @@ interface Impact {
 // file never touches the Vibration API or any other DOM global itself.
 export type HapticEventKind = 'paddle-hit' | 'wall-bounce' | 'score' | 'power-up';
 
-export type PowerUpKind = 'speed-boost' | 'fast-ball' | 'giant-paddle' | 'multi-ball';
+export type PowerUpKind = 'freeze-paddle' | 'fast-ball' | 'giant-paddle' | 'multi-ball';
 
 export interface PowerUp {
   id: number;
@@ -450,7 +450,7 @@ interface PowerUpDefinition {
 // introduce another power-up. Spawn/collision/expiry logic below stays
 // generic and never branches on `kind` directly.
 const POWER_UP_DEFINITIONS: PowerUpDefinition[] = [
-  { kind: 'speed-boost', activate: (game) => game.activateSpeedBoost() },
+  { kind: 'freeze-paddle', activate: (game) => game.activateFreezePaddle() },
   { kind: 'fast-ball', activate: (game) => game.activateFastBall() },
   { kind: 'giant-paddle', activate: (game) => game.activateGiantPaddle() },
   { kind: 'multi-ball', activate: (game) => game.activateMultiBall() },
@@ -459,7 +459,7 @@ const POWER_UP_DEFINITIONS: PowerUpDefinition[] = [
 export const POWER_UP_KINDS: readonly PowerUpKind[] = POWER_UP_DEFINITIONS.map((entry) => entry.kind);
 
 const POWER_UP_VISUALS: Record<PowerUpKind, { color: string; highlight: string; glow: string; label: string }> = {
-  'speed-boost': { color: '#f4a261', highlight: '#ffe0b3', glow: 'rgba(244, 162, 97, 0.55)', label: 'S' },
+  'freeze-paddle': { color: '#48cae4', highlight: '#caf0f8', glow: 'rgba(72, 202, 228, 0.55)', label: 'Z' },
   'fast-ball': { color: '#e76f51', highlight: '#ffb59e', glow: 'rgba(231, 111, 81, 0.55)', label: 'F' },
   'giant-paddle': { color: '#8ecae6', highlight: '#e0f4ff', glow: 'rgba(142, 202, 230, 0.55)', label: 'G' },
   'multi-ball': { color: '#c9a0f5', highlight: '#ecdcff', glow: 'rgba(201, 160, 245, 0.55)', label: 'M' },
@@ -544,8 +544,8 @@ export class Game {
   lastPaddleTouch: PaddleId | null = null; // paddle that most recently hit the ball this rally
   paddleSpeedMultiplier1 = 1;
   paddleSpeedMultiplier2 = 1;
-  speedBoostRemaining1 = 0;
-  speedBoostRemaining2 = 0;
+  freezeRemaining1 = 0;
+  freezeRemaining2 = 0;
   paddleWidthMultiplier1 = 1;
   paddleWidthMultiplier2 = 1;
   giantPaddleRemaining1 = 0;
@@ -640,8 +640,8 @@ export class Game {
     this.lastPaddleTouch = null;
     this.paddleSpeedMultiplier1 = 1;
     this.paddleSpeedMultiplier2 = 1;
-    this.speedBoostRemaining1 = 0;
-    this.speedBoostRemaining2 = 0;
+    this.freezeRemaining1 = 0;
+    this.freezeRemaining2 = 0;
     this.paddleWidthMultiplier1 = 1;
     this.paddleWidthMultiplier2 = 1;
     this.giantPaddleRemaining1 = 0;
@@ -754,8 +754,9 @@ export class Game {
   }
 
   // Like movePaddle, but rate-limited to PADDLE_MOVE_STEP_RATIO per call so
-  // paddle speed is an actual gameplay quantity: Speed Boost (which scales
-  // the limit) now visibly changes how fast the paddle can catch up.
+  // paddle speed is an actual gameplay quantity: Freeze (which scales the
+  // limit down for whichever paddle didn't just hit the ball) visibly
+  // changes how fast that paddle can catch up.
   private dragPaddle(paddle: PaddleId, x: number, width: number): void {
     const halfWidth = this.paddleWidth(paddle, width) / 2;
     const target = clamp(x, halfWidth, width - halfWidth);
@@ -770,17 +771,20 @@ export class Game {
     }
   }
 
-  activateSpeedBoost(): void {
-    const paddle = this.lastPaddleTouch;
-    if (paddle === null) {
+  // Slows down whichever paddle did NOT most recently touch the ball, giving
+  // the toucher's opponent a harder time catching up to the return volley.
+  activateFreezePaddle(): void {
+    const toucher = this.lastPaddleTouch;
+    if (toucher === null) {
       return;
     }
-    if (paddle === 1) {
-      this.paddleSpeedMultiplier1 = SPEED_BOOST_MULTIPLIER;
-      this.speedBoostRemaining1 = SPEED_BOOST_DURATION_SECONDS;
+    const target: PaddleId = toucher === 1 ? 2 : 1;
+    if (target === 1) {
+      this.paddleSpeedMultiplier1 = FREEZE_PADDLE_MULTIPLIER;
+      this.freezeRemaining1 = FREEZE_PADDLE_DURATION_SECONDS;
     } else {
-      this.paddleSpeedMultiplier2 = SPEED_BOOST_MULTIPLIER;
-      this.speedBoostRemaining2 = SPEED_BOOST_DURATION_SECONDS;
+      this.paddleSpeedMultiplier2 = FREEZE_PADDLE_MULTIPLIER;
+      this.freezeRemaining2 = FREEZE_PADDLE_DURATION_SECONDS;
     }
   }
 
@@ -846,10 +850,10 @@ export class Game {
     if (dx * dx + dy * dy > collisionRadius * collisionRadius) {
       return;
     }
-    // Speed Boost and Giant Paddle attribute their effect to whichever
+    // Freeze and Giant Paddle attribute their effect based on whichever
     // paddle last touched the ball. If neither paddle has touched it yet,
     // leave the icon in play instead of silently consuming it for nothing.
-    if ((powerUp.kind === 'speed-boost' || powerUp.kind === 'giant-paddle') && this.lastPaddleTouch === null) {
+    if ((powerUp.kind === 'freeze-paddle' || powerUp.kind === 'giant-paddle') && this.lastPaddleTouch === null) {
       return;
     }
     this.activePowerUp = null;
@@ -989,15 +993,15 @@ export class Game {
       this.screenShakeRemaining = Math.max(0, this.screenShakeRemaining - dt);
     }
 
-    if (this.speedBoostRemaining1 > 0) {
-      this.speedBoostRemaining1 = Math.max(0, this.speedBoostRemaining1 - dt);
-      if (this.speedBoostRemaining1 === 0) {
+    if (this.freezeRemaining1 > 0) {
+      this.freezeRemaining1 = Math.max(0, this.freezeRemaining1 - dt);
+      if (this.freezeRemaining1 === 0) {
         this.paddleSpeedMultiplier1 = 1;
       }
     }
-    if (this.speedBoostRemaining2 > 0) {
-      this.speedBoostRemaining2 = Math.max(0, this.speedBoostRemaining2 - dt);
-      if (this.speedBoostRemaining2 === 0) {
+    if (this.freezeRemaining2 > 0) {
+      this.freezeRemaining2 = Math.max(0, this.freezeRemaining2 - dt);
+      if (this.freezeRemaining2 === 0) {
         this.paddleSpeedMultiplier2 = 1;
       }
     }
@@ -1498,7 +1502,7 @@ export class Game {
   }
 
   // Renders the buff bars for one paddle: a distinct color per buff type,
-  // reading `speedBoostRemaining*`/`giantPaddleRemaining*` without touching
+  // reading `freezeRemaining*`/`giantPaddleRemaining*` without touching
   // the multipliers those fields also gate.
   private renderPaddleBuffs(
     ctx: CanvasRenderingContext2D,
@@ -1510,9 +1514,9 @@ export class Game {
   ): void {
     const direction: 1 | -1 = paddle === 1 ? -1 : 1;
     let slot = 0;
-    const speedRemaining = paddle === 1 ? this.speedBoostRemaining1 : this.speedBoostRemaining2;
-    if (speedRemaining > 0) {
-      const progress = speedRemaining / SPEED_BOOST_DURATION_SECONDS;
+    const freezeRemaining = paddle === 1 ? this.freezeRemaining1 : this.freezeRemaining2;
+    if (freezeRemaining > 0) {
+      const progress = freezeRemaining / FREEZE_PADDLE_DURATION_SECONDS;
       this.renderBuffIndicator(
         ctx,
         centerX,
@@ -1522,7 +1526,7 @@ export class Game {
         paddleHeight,
         slot,
         progress,
-        POWER_UP_VISUALS['speed-boost'].color,
+        POWER_UP_VISUALS['freeze-paddle'].color,
       );
       slot += 1;
     }
