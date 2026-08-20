@@ -202,6 +202,28 @@ describe('Game map select', () => {
     expect(game.ballVX !== 0 || game.ballVY !== 0).toBe(true);
   });
 
+  it('keeps paddle 1 centered when the Earth button tap lands off-center', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.onPointerDown(1, 200, 400, 400, 800); // dismiss the title screen
+
+    game.onPointerDown(1, 90, 800 * EARTH_BUTTON_Y_RATIO, 400, 800); // near left edge of Earth's button
+
+    expect(game.selectedMap).toBe('earth');
+    expect(game.paddle1X).toBe(200);
+  });
+
+  it('keeps paddle 2 centered when the Mars button tap lands off-center', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.onPointerDown(1, 200, 400, 400, 800); // dismiss the title screen
+
+    game.onPointerDown(1, 90, 800 * MARS_BUTTON_Y_RATIO, 400, 800); // near left edge of Mars's button
+
+    expect(game.selectedMap).toBe('mars');
+    expect(game.paddle2X).toBe(200);
+  });
+
   it('ignores taps that miss both map buttons, staying on the map-select screen', () => {
     const game = new Game();
     game.update(0, 400, 800);
@@ -211,6 +233,17 @@ describe('Game map select', () => {
 
     expect(game.mapSelectActive).toBe(true);
     expect(game.selectedMap).toBeNull();
+  });
+
+  it('does not move a paddle when a tap on the map-select screen misses both buttons', () => {
+    const game = new Game();
+    game.update(0, 400, 800);
+    game.onPointerDown(1, 200, 400, 400, 800); // dismiss the title screen
+
+    game.onPointerDown(2, 90, 400, 400, 800); // off-center tap, hits neither button
+
+    expect(game.paddle1X).toBe(200);
+    expect(game.paddle2X).toBe(200);
   });
 
   it('keeps the same map through restartMatch instead of returning to map-select', () => {

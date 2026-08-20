@@ -637,6 +637,7 @@ export class Game {
         this.mapSelectActive = false;
         this.serveDelayRemaining = SERVE_DELAY_SECONDS;
       }
+      return;
     } else if (this.winner !== null) {
       this.restartMatch(width, height);
       return;
