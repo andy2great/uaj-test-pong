@@ -1936,4 +1936,35 @@ describe('Menu button tap areas cover their full visible bounds (#78)', () => {
       expect(game.paused).toBe(true);
     });
   });
+
+  describe('mode-select buttons', () => {
+    const ONE_PLAYER_RECT = { x: 76, y: 344, w: 248, h: 68 };
+    const TWO_PLAYER_RECT = { x: 76, y: 436, w: 248, h: 68 };
+
+    function reachModeSelect(): Game {
+      const game = new Game();
+      game.update(0, 400, 800);
+      tap(game, 200, 400); // dismiss the title screen
+      tap(game, 200, 800 * 0.43); // taps the Earth button
+      return game;
+    }
+
+    it.each(corners(ONE_PLAYER_RECT))('sets singlePlayer when 1 Player is tapped at (%i, %i)', (x, y) => {
+      const game = reachModeSelect();
+
+      tap(game, x, y);
+
+      expect(game.modeSelectActive).toBe(false);
+      expect(game.singlePlayer).toBe(true);
+    });
+
+    it.each(corners(TWO_PLAYER_RECT))('leaves singlePlayer false when 2 Player is tapped at (%i, %i)', (x, y) => {
+      const game = reachModeSelect();
+
+      tap(game, x, y);
+
+      expect(game.modeSelectActive).toBe(false);
+      expect(game.singlePlayer).toBe(false);
+    });
+  });
 });
