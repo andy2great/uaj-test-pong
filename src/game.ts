@@ -359,12 +359,20 @@ const PAUSE_OVERLAY_HEADING_GAP_RATIO = 0.06; // gap between the "Paused" headin
 const PAUSE_OVERLAY_PANEL_TOP_PADDING_RATIO = 0.05; // fraction of canvas height, above the heading
 const PAUSE_OVERLAY_PANEL_BOTTOM_PADDING_RATIO = 0.05; // fraction of canvas height, below the last button
 
-type PauseAction = 'resume' | 'restart' | 'quit';
+type PauseAction = 'resume' | 'map' | 'settings' | 'restart' | 'quit';
 const PAUSE_ACTIONS: { action: PauseAction; label: string }[] = [
   { action: 'resume', label: 'Resume' },
+  { action: 'map', label: 'Change Map' },
+  { action: 'settings', label: 'Settings' },
   { action: 'restart', label: 'Restart Match' },
   { action: 'quit', label: 'Quit to Title' },
 ];
+
+// Pause > Settings (#71): a single stacked-button screen, styled like the
+// pause overlay itself, exposing session-scoped options (currently just the
+// WebAudio sound toggle) without leaving the paused match.
+type PauseSettingsAction = 'toggle-sound' | 'back';
+const PAUSE_SETTINGS_ACTIONS: { action: PauseSettingsAction }[] = [{ action: 'toggle-sound' }, { action: 'back' }];
 
 // Shared menu identity: the title and map-select screens both draw inside a
 // bordered, vignetted panel topped by the same orbiting-icon flourish, so
@@ -564,6 +572,9 @@ export class Game {
   mapSelectActive = false; // shown right after the title screen, dismissed by picking a map
   selectedMap: MapId | null = null; // null until a map is picked; persists across restartMatch
   paused = false; // true while the pause overlay (#70) is up; freezes ball/paddle/power-up updates
+  pauseMapSelectActive = false; // true while Change Map (#71) is up, shown from within the pause overlay
+  pauseSettingsActive = false; // true while Settings (#71) is up, shown from within the pause overlay
+  soundEnabled = true; // toggled from Pause > Settings (#71); gates playSound() calls in main.ts, persists for the session
 
   activePowerUp: PowerUp | null = null;
   lastPaddleTouch: PaddleId | null = null; // paddle that most recently hit the ball this rally
@@ -765,10 +776,10 @@ export class Game {
     return x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h;
   }
 
-  // Bounding box of the index-th pause-overlay action button (0 = Resume, in
-  // PAUSE_ACTIONS order), shared by hit-testing and rendering.
-  private pauseOverlayButtonRect(index: number, width: number, height: number): { x: number; y: number; w: number; h: number } {
-    const count = PAUSE_ACTIONS.length;
+  // Bounding box of the index-th button in a stack of `count` pause-styled
+  // action buttons, shared by the pause overlay and the pause-settings
+  // screen so their hit-testing and rendering can never drift apart.
+  private stackedActionButtonRect(index: number, count: number, width: number, height: number): { x: number; y: number; w: number; h: number } {
     const w = width * PAUSE_OVERLAY_BUTTON_WIDTH_RATIO;
     const h = height * PAUSE_OVERLAY_BUTTON_HEIGHT_RATIO;
     const gap = height * PAUSE_OVERLAY_BUTTON_GAP_RATIO;
@@ -779,6 +790,12 @@ export class Game {
     return { x, y, w, h };
   }
 
+  // Bounding box of the index-th pause-overlay action button (0 = Resume, in
+  // PAUSE_ACTIONS order), shared by hit-testing and rendering.
+  private pauseOverlayButtonRect(index: number, width: number, height: number): { x: number; y: number; w: number; h: number } {
+    return this.stackedActionButtonRect(index, PAUSE_ACTIONS.length, width, height);
+  }
+
   // Returns the pause-overlay action tapped at (x, y), or null when the tap
   // missed every button.
   private pauseActionAt(x: number, y: number, width: number, height: number): PauseAction | null {
@@ -786,6 +803,24 @@ export class Game {
       const rect = this.pauseOverlayButtonRect(i, width, height);
       if (x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h) {
         return PAUSE_ACTIONS[i].action;
+      }
+    }
+    return null;
+  }
+
+  // Bounding box of the index-th pause-settings action button (0 = the sound
+  // toggle, 1 = Back), shared by hit-testing and rendering.
+  private pauseSettingsButtonRect(index: number, width: number, height: number): { x: number; y: number; w: number; h: number } {
+    return this.stackedActionButtonRect(index, PAUSE_SETTINGS_ACTIONS.length, width, height);
+  }
+
+  // Returns the pause-settings action tapped at (x, y), or null when the tap
+  // missed every button.
+  private pauseSettingsActionAt(x: number, y: number, width: number, height: number): PauseSettingsAction | null {
+    for (let i = 0; i < PAUSE_SETTINGS_ACTIONS.length; i += 1) {
+      const rect = this.pauseSettingsButtonRect(i, width, height);
+      if (x >= rect.x && x <= rect.x + rect.w && y >= rect.y && y <= rect.y + rect.h) {
+        return PAUSE_SETTINGS_ACTIONS[i].action;
       }
     }
     return null;
@@ -807,10 +842,36 @@ export class Game {
       }
       return;
     }
+    // Pause > Change Map (#71): applies the picked map to the backdrop and
+    // returns to the pause overlay (still paused) without touching score,
+    // ball, or power-up state -- unlike the pre-match map-select flow above.
+    if (this.pauseMapSelectActive) {
+      const chosen = this.mapAt(x, y, width, height);
+      if (chosen !== null) {
+        this.selectedMap = chosen;
+        this.pauseMapSelectActive = false;
+      }
+      return;
+    }
+    // Pause > Settings (#71): toggles session-scoped options or returns to
+    // the pause overlay, without touching match state.
+    if (this.pauseSettingsActive) {
+      const action = this.pauseSettingsActionAt(x, y, width, height);
+      if (action === 'toggle-sound') {
+        this.soundEnabled = !this.soundEnabled;
+      } else if (action === 'back') {
+        this.pauseSettingsActive = false;
+      }
+      return;
+    }
     if (this.paused) {
       const action = this.pauseActionAt(x, y, width, height);
       if (action === 'resume') {
         this.paused = false;
+      } else if (action === 'map') {
+        this.pauseMapSelectActive = true;
+      } else if (action === 'settings') {
+        this.pauseSettingsActive = true;
       } else if (action === 'restart') {
         this.paused = false;
         this.restartMatch(width, height);
@@ -1916,6 +1977,43 @@ export class Game {
     ctx.restore();
   }
 
+  // Draws the map-select screen: a dark scrim, the "Choose your map" heading
+  // inside a menu panel, and the theme cards. Shared by the pre-match flow
+  // (mapSelectActive) and Pause > Change Map (#71, pauseMapSelectActive) so
+  // both read as the exact same designed screen.
+  private renderMapSelectScreen(ctx: CanvasRenderingContext2D, width: number, height: number): void {
+    ctx.fillStyle = 'rgba(10, 17, 40, 0.55)';
+    ctx.fillRect(0, 0, width, height);
+
+    const themes = Object.values(MAP_THEMES);
+    const firstRect = this.mapButtonRect(0, width, height);
+    const lastRect = this.mapButtonRect(themes.length - 1, width, height);
+    const headingY = firstRect.y - height * 0.06;
+    const iconY = headingY - height * 0.065;
+
+    const panelWidth = width * MENU_PANEL_WIDTH_RATIO;
+    const panelTop = iconY - height * MAP_SELECT_PANEL_TOP_PADDING_RATIO;
+    const panelBottom = lastRect.y + lastRect.h + height * MAP_SELECT_PANEL_BOTTOM_PADDING_RATIO;
+    const panelHeight = panelBottom - panelTop;
+    this.renderMenuPanel(ctx, width / 2, panelTop + panelHeight / 2, panelWidth, panelHeight);
+    this.renderMenuIcon(ctx, width / 2, iconY, height);
+
+    ctx.save();
+    ctx.fillStyle = '#e8ecf5';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(120, 170, 255, 0.85)';
+    ctx.shadowBlur = height * 0.02;
+    applyTextStyle(ctx, 'secondary', height * 0.03);
+    ctx.fillText('Choose your map', width / 2, headingY);
+    ctx.restore();
+
+    themes.forEach((theme, i) => {
+      const rect = this.mapButtonRect(i, width, height);
+      this.renderMapCard(ctx, theme, rect);
+    });
+  }
+
   // Draws the pause button: a rounded translucent icon showing two vertical
   // bars, tucked in the top-right corner. Purely visual -- hit-testing lives
   // in pauseButtonAt/pauseButtonRect above so they can never drift apart.
@@ -2003,6 +2101,37 @@ export class Game {
       const rect = this.pauseOverlayButtonRect(i, width, height);
       this.renderPauseActionButton(ctx, entry.label, rect);
     });
+  }
+
+  // Draws the Pause > Settings screen (#71): a dark scrim, the "Settings"
+  // heading inside a menu panel, and the toggle/back buttons -- styled like
+  // renderPauseOverlay so it reads as the same designed system.
+  private renderPauseSettingsScreen(ctx: CanvasRenderingContext2D, width: number, height: number): void {
+    ctx.fillStyle = 'rgba(10, 17, 40, 0.85)';
+    ctx.fillRect(0, 0, width, height);
+
+    const count = PAUSE_SETTINGS_ACTIONS.length;
+    const firstRect = this.pauseSettingsButtonRect(0, width, height);
+    const lastRect = this.pauseSettingsButtonRect(count - 1, width, height);
+    const headingY = firstRect.y - height * PAUSE_OVERLAY_HEADING_GAP_RATIO;
+    const panelWidth = width * MENU_PANEL_WIDTH_RATIO;
+    const panelTop = headingY - height * PAUSE_OVERLAY_PANEL_TOP_PADDING_RATIO;
+    const panelBottom = lastRect.y + lastRect.h + height * PAUSE_OVERLAY_PANEL_BOTTOM_PADDING_RATIO;
+    const panelHeight = panelBottom - panelTop;
+    this.renderMenuPanel(ctx, width / 2, panelTop + panelHeight / 2, panelWidth, panelHeight);
+
+    ctx.save();
+    ctx.fillStyle = '#e8ecf5';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.shadowColor = 'rgba(120, 170, 255, 0.85)';
+    ctx.shadowBlur = height * 0.02;
+    applyTextStyle(ctx, 'primary', height * 0.045);
+    ctx.fillText('Settings', width / 2, headingY);
+    ctx.restore();
+
+    this.renderPauseActionButton(ctx, `Sound: ${this.soundEnabled ? 'On' : 'Off'}`, firstRect);
+    this.renderPauseActionButton(ctx, 'Back', lastRect);
   }
 
   render(ctx: CanvasRenderingContext2D, width: number, height: number): void {
@@ -2124,37 +2253,12 @@ export class Game {
       ctx.restore();
     }
 
+    // mapSelectActive covers the pre-match flow (title -> map-select); the
+    // Pause > Change Map flow (#71) shows the exact same screen via
+    // pauseMapSelectActive, rendered further down alongside the rest of the
+    // pause sub-screens so it never draws underneath the pause overlay.
     if (this.mapSelectActive) {
-      ctx.fillStyle = 'rgba(10, 17, 40, 0.55)';
-      ctx.fillRect(0, 0, width, height);
-
-      const themes = Object.values(MAP_THEMES);
-      const firstRect = this.mapButtonRect(0, width, height);
-      const lastRect = this.mapButtonRect(themes.length - 1, width, height);
-      const headingY = firstRect.y - height * 0.06;
-      const iconY = headingY - height * 0.065;
-
-      const panelWidth = width * MENU_PANEL_WIDTH_RATIO;
-      const panelTop = iconY - height * MAP_SELECT_PANEL_TOP_PADDING_RATIO;
-      const panelBottom = lastRect.y + lastRect.h + height * MAP_SELECT_PANEL_BOTTOM_PADDING_RATIO;
-      const panelHeight = panelBottom - panelTop;
-      this.renderMenuPanel(ctx, width / 2, panelTop + panelHeight / 2, panelWidth, panelHeight);
-      this.renderMenuIcon(ctx, width / 2, iconY, height);
-
-      ctx.save();
-      ctx.fillStyle = '#e8ecf5';
-      ctx.textAlign = 'center';
-      ctx.textBaseline = 'middle';
-      ctx.shadowColor = 'rgba(120, 170, 255, 0.85)';
-      ctx.shadowBlur = height * 0.02;
-      applyTextStyle(ctx, 'secondary', height * 0.03);
-      ctx.fillText('Choose your map', width / 2, headingY);
-      ctx.restore();
-
-      themes.forEach((theme, i) => {
-        const rect = this.mapButtonRect(i, width, height);
-        this.renderMapCard(ctx, theme, rect);
-      });
+      this.renderMapSelectScreen(ctx, width, height);
     }
 
     if (this.winner !== null) {
@@ -2193,7 +2297,13 @@ export class Game {
     }
 
     if (this.paused) {
-      this.renderPauseOverlay(ctx, width, height);
+      if (this.pauseMapSelectActive) {
+        this.renderMapSelectScreen(ctx, width, height);
+      } else if (this.pauseSettingsActive) {
+        this.renderPauseSettingsScreen(ctx, width, height);
+      } else {
+        this.renderPauseOverlay(ctx, width, height);
+      }
     }
 
     ctx.restore();

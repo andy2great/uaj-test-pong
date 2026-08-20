@@ -1189,15 +1189,15 @@ describe('Game screen shake', () => {
 });
 
 describe('Game pause (#70)', () => {
-  // The pause button and the three overlay action buttons are all ratios of
+  // The pause button and the five overlay action buttons are all ratios of
   // width/height alone (see their *Ratio constants in game.ts), so these
   // hold for any canvas size at the default 400x800 used by startGame.
   const PAUSE_BUTTON_X = 352;
   const PAUSE_BUTTON_Y = 48;
   const RESUME_BUTTON_X = 200;
-  const RESUME_BUTTON_Y = 332;
-  const RESTART_BUTTON_Y = 424;
-  const QUIT_BUTTON_Y = 516;
+  const RESUME_BUTTON_Y = 240;
+  const RESTART_BUTTON_Y = 516;
+  const QUIT_BUTTON_Y = 608;
 
   it('does not pause when tapping the pause button coordinates before a match starts', () => {
     const game = new Game();
@@ -1322,5 +1322,145 @@ describe('Game pause (#70)', () => {
 
     game.onPointerDown(1, 200, 400, 400, 800); // requires re-picking a map, same as a fresh title dismissal
     expect(game.mapSelectActive).toBe(true);
+  });
+});
+
+describe('Game pause > Change Map and Settings (#71)', () => {
+  const PAUSE_BUTTON_X = 352;
+  const PAUSE_BUTTON_Y = 48;
+  const RESUME_BUTTON_X = 200;
+  const CHANGE_MAP_BUTTON_Y = 332;
+  const SETTINGS_BUTTON_Y = 424;
+  // Reuses the same button-center ratio as the "Game map select" describe
+  // block above, since Pause > Change Map renders the exact same screen.
+  const MARS_BUTTON_Y = 800 * 0.57;
+  // The settings screen only ever stacks two buttons (sound toggle, back),
+  // regardless of PAUSE_ACTIONS.length, so its centers differ from the main
+  // pause overlay's.
+  const SOUND_TOGGLE_BUTTON_Y = 378;
+  const SETTINGS_BACK_BUTTON_Y = 470;
+
+  function pause(game: Game): void {
+    game.onPointerDown(1, PAUSE_BUTTON_X, PAUSE_BUTTON_Y, 400, 800);
+  }
+
+  it('opens the map-select screen, still paused, when Change Map is tapped', () => {
+    const game = startGame();
+    pause(game);
+
+    game.onPointerDown(1, RESUME_BUTTON_X, CHANGE_MAP_BUTTON_Y, 400, 800);
+
+    expect(game.paused).toBe(true);
+    expect(game.pauseMapSelectActive).toBe(true);
+  });
+
+  it('applies the newly picked map without resetting score, ball, or power-ups, then returns to the pause overlay', () => {
+    const game = startGame(); // picks Earth
+    game.score1 = 3;
+    game.score2 = 5;
+    game.activePowerUp = { id: 1, kind: 'fast-ball', x: game.ballX, y: game.ballY };
+    const { ballX, ballY, ballVX, ballVY } = game;
+    pause(game);
+    game.onPointerDown(1, RESUME_BUTTON_X, CHANGE_MAP_BUTTON_Y, 400, 800);
+
+    game.onPointerDown(1, 200, MARS_BUTTON_Y, 400, 800);
+
+    expect(game.selectedMap).toBe('mars');
+    expect(game.pauseMapSelectActive).toBe(false);
+    expect(game.paused).toBe(true); // back at the pause overlay, not resumed
+    expect(game.score1).toBe(3);
+    expect(game.score2).toBe(5);
+    expect(game.ballX).toBe(ballX);
+    expect(game.ballY).toBe(ballY);
+    expect(game.ballVX).toBe(ballVX);
+    expect(game.ballVY).toBe(ballVY);
+    expect(game.activePowerUp).toEqual({ id: 1, kind: 'fast-ball', x: ballX, y: ballY });
+  });
+
+  it('keeps gameplay frozen while the pause map-select screen is up', () => {
+    const game = startGame();
+    pause(game);
+    game.onPointerDown(1, RESUME_BUTTON_X, CHANGE_MAP_BUTTON_Y, 400, 800);
+    const { ballX, ballY } = game;
+
+    game.update(2, 400, 800);
+
+    expect(game.ballX).toBe(ballX);
+    expect(game.ballY).toBe(ballY);
+  });
+
+  it('ignores a tap that misses both map buttons, staying on the pause map-select screen', () => {
+    const game = startGame(); // picks Earth
+    pause(game);
+    game.onPointerDown(1, RESUME_BUTTON_X, CHANGE_MAP_BUTTON_Y, 400, 800);
+
+    game.onPointerDown(1, 200, 400, 400, 800); // dead center, between the two buttons
+
+    expect(game.pauseMapSelectActive).toBe(true);
+    expect(game.selectedMap).toBe('earth');
+  });
+
+  it('opens the settings screen, still paused, when Settings is tapped', () => {
+    const game = startGame();
+    pause(game);
+
+    game.onPointerDown(1, RESUME_BUTTON_X, SETTINGS_BUTTON_Y, 400, 800);
+
+    expect(game.paused).toBe(true);
+    expect(game.pauseSettingsActive).toBe(true);
+  });
+
+  it('defaults sound to enabled', () => {
+    const game = new Game();
+    expect(game.soundEnabled).toBe(true);
+  });
+
+  it('toggles soundEnabled when the sound button is tapped, without touching match state', () => {
+    const game = startGame();
+    game.score1 = 3;
+    pause(game);
+    game.onPointerDown(1, RESUME_BUTTON_X, SETTINGS_BUTTON_Y, 400, 800);
+
+    game.onPointerDown(1, RESUME_BUTTON_X, SOUND_TOGGLE_BUTTON_Y, 400, 800);
+
+    expect(game.soundEnabled).toBe(false);
+    expect(game.pauseSettingsActive).toBe(true); // stays on the settings screen after toggling
+    expect(game.score1).toBe(3);
+
+    game.onPointerDown(1, RESUME_BUTTON_X, SOUND_TOGGLE_BUTTON_Y, 400, 800);
+    expect(game.soundEnabled).toBe(true);
+  });
+
+  it('returns to the pause overlay when Back is tapped on the settings screen', () => {
+    const game = startGame();
+    pause(game);
+    game.onPointerDown(1, RESUME_BUTTON_X, SETTINGS_BUTTON_Y, 400, 800);
+
+    game.onPointerDown(1, RESUME_BUTTON_X, SETTINGS_BACK_BUTTON_Y, 400, 800);
+
+    expect(game.pauseSettingsActive).toBe(false);
+    expect(game.paused).toBe(true);
+  });
+
+  it('keeps the sound preference through Resume, Restart Match, and Quit to Title', () => {
+    const game = startGame();
+    pause(game);
+    game.onPointerDown(1, RESUME_BUTTON_X, SETTINGS_BUTTON_Y, 400, 800);
+    game.onPointerDown(1, RESUME_BUTTON_X, SOUND_TOGGLE_BUTTON_Y, 400, 800);
+    expect(game.soundEnabled).toBe(false);
+    game.onPointerDown(1, RESUME_BUTTON_X, SETTINGS_BACK_BUTTON_Y, 400, 800);
+
+    game.onPointerDown(1, RESUME_BUTTON_X, 240, 400, 800); // taps Resume
+
+    expect(game.paused).toBe(false);
+    expect(game.soundEnabled).toBe(false);
+
+    pause(game);
+    game.onPointerDown(1, RESUME_BUTTON_X, 516, 400, 800); // taps Restart Match
+    expect(game.soundEnabled).toBe(false);
+
+    pause(game);
+    game.onPointerDown(1, RESUME_BUTTON_X, 608, 400, 800); // taps Quit to Title
+    expect(game.soundEnabled).toBe(false);
   });
 });
