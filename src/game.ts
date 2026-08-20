@@ -253,6 +253,60 @@ function getStarGlowGradients(
   return gradients;
 }
 
+// Subtle procedural grain layered over the backdrop and menu panels so they
+// read as textured material rather than flat digital fills (#88). The tile
+// is generated once from a deterministic hash (same convention as the
+// starfield) and cached as a repeating CanvasPattern -- redoing per-pixel
+// noise every frame would be wasteful for a purely decorative overlay.
+const GRAIN_TILE_SIZE = 64;
+const GRAIN_BACKDROP_ALPHA = 0.05;
+const GRAIN_PANEL_ALPHA = 0.16;
+let grainPatternCache: CanvasPattern | null = null;
+
+function getGrainPattern(ctx: CanvasRenderingContext2D): CanvasPattern | null {
+  if (grainPatternCache) {
+    return grainPatternCache;
+  }
+  if (typeof OffscreenCanvas === 'undefined') {
+    return null;
+  }
+  const tile = new OffscreenCanvas(GRAIN_TILE_SIZE, GRAIN_TILE_SIZE);
+  const tileCtx = tile.getContext('2d');
+  if (!tileCtx) {
+    return null;
+  }
+  const imageData = tileCtx.createImageData(GRAIN_TILE_SIZE, GRAIN_TILE_SIZE);
+  for (let p = 0; p < GRAIN_TILE_SIZE * GRAIN_TILE_SIZE; p++) {
+    const shade = Math.floor(hash01(p * 12.9898 + 78.233) * 255);
+    const i = p * 4;
+    imageData.data[i] = shade;
+    imageData.data[i + 1] = shade;
+    imageData.data[i + 2] = shade;
+    imageData.data[i + 3] = 255;
+  }
+  tileCtx.putImageData(imageData, 0, 0);
+  grainPatternCache = ctx.createPattern(tile, 'repeat');
+  return grainPatternCache;
+}
+
+// Fills `w`x`h` at (x, y) with the cached grain pattern using 'overlay'
+// blending, so it reads as material texture (darkening/lightening what's
+// underneath) instead of a flat translucent haze on top of it. Callers that
+// need it confined to a shape (e.g. a rounded panel) should clip before
+// calling. No-ops if OffscreenCanvas isn't available (#88).
+function renderGrain(ctx: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, alpha: number): void {
+  const pattern = getGrainPattern(ctx);
+  if (!pattern) {
+    return;
+  }
+  ctx.save();
+  ctx.globalAlpha = alpha;
+  ctx.globalCompositeOperation = 'overlay';
+  ctx.fillStyle = pattern;
+  ctx.fillRect(x, y, w, h);
+  ctx.restore();
+}
+
 // Orbiting planets drift behind the play field, evoking a slow solar-system
 // backdrop. Orbit center is fixed as a fraction of canvas size so it holds up
 // across the portrait aspect ratios the game supports.
@@ -1420,13 +1474,12 @@ export class Game {
   private renderBackdrop(ctx: CanvasRenderingContext2D, width: number, height: number): void {
     if (this.selectedMap === 'earth') {
       this.renderEarthBackdrop(ctx, width, height);
-      return;
-    }
-    if (this.selectedMap === 'mars') {
+    } else if (this.selectedMap === 'mars') {
       this.renderMarsBackdrop(ctx, width, height);
-      return;
+    } else {
+      this.renderDefaultBackdrop(ctx, width, height);
     }
-    this.renderDefaultBackdrop(ctx, width, height);
+    renderGrain(ctx, 0, 0, width, height, GRAIN_BACKDROP_ALPHA);
   }
 
   // Twinkling starfield, shared by all three backdrops -- only the star
@@ -2067,6 +2120,15 @@ export class Game {
     ctx.beginPath();
     ctx.roundRect(x, y, panelWidth, panelHeight, radius);
     ctx.fill();
+    // Grained/brushed surface instead of a flat gradient panel (#88); clipped
+    // to the panel's own rounded-rect path so it never bleeds past the edge.
+    ctx.clip();
+    renderGrain(ctx, x, y, panelWidth, panelHeight, GRAIN_PANEL_ALPHA);
+    ctx.restore();
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.roundRect(x, y, panelWidth, panelHeight, radius);
     ctx.strokeStyle = 'rgba(232, 236, 245, 0.3)';
     ctx.lineWidth = Math.max(1, panelHeight * 0.006);
     ctx.stroke();
