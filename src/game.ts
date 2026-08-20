@@ -992,6 +992,10 @@ export class Game {
       return;
     }
     const paddle: PaddleId = y < height / 2 ? 1 : 2;
+    if (paddle === 1 && this.singlePlayer) {
+      // AI-controlled in single-player mode: ignore touches on the top half.
+      return;
+    }
     this.pointerPaddle.set(pointerId, paddle);
     this.movePaddle(paddle, x, width);
   }
@@ -1068,6 +1072,14 @@ export class Game {
     } else {
       this.paddle2X = next;
     }
+  }
+
+  // Single-player AI (#81): tracks the ball's x position, reusing
+  // dragPaddle's per-frame step clamp so it catches up at the same rate a
+  // human drag would rather than snapping instantly -- keeps the AI
+  // beatable.
+  private updateAIPaddle(width: number): void {
+    this.dragPaddle(1, this.ballX, width);
   }
 
   // Slows down whichever paddle did NOT most recently touch the ball, giving
@@ -1346,6 +1358,10 @@ export class Game {
         this.serve(width, height);
       }
       return;
+    }
+
+    if (this.singlePlayer) {
+      this.updateAIPaddle(width);
     }
 
     const primaryBall: Ball = { x: this.ballX, y: this.ballY, vx: this.ballVX, vy: this.ballVY };
